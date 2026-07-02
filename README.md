@@ -101,5 +101,8 @@ processed on-device in real time. See [`PRD.md`](PRD.md) for the full product re
 
 ## Notes on campus data
 
-Building coordinates in `lib/data/campus_data.dart` are approximate and centralised in one
-place; they should be field-verified / GPS-surveyed before a production release.
+Building codes (A1–A8, B1–B2, C1, Mensa) and coordinates in
+`lib/data/campus_data.dart` are sourced from the OpenStreetMap mapping of the THM Friedberg
+campus (Wilhelm-Leuschner-Straße 13, 61169 Friedberg). They are centralised in one file, so
+positions or descriptions can be refined (e.g. against the official campus plan) without
+touching any UI or logic code.

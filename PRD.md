@@ -230,10 +230,11 @@ The application follows a simple, robust pipeline:
 ## 11. Campus Building Data
 
 Buildings are stored on-device as a typed dataset (code, name, category, latitude,
-longitude, optional description). The initial dataset covers the main THM Friedberg campus
-buildings (Wilhelm-Leuschner-Straße 13, 61169 Friedberg). Coordinates are approximate and
-intended to be field-verified/GPS-surveyed before production release; the data layer is
-structured so coordinates can be updated in one place without code changes elsewhere.
+longitude, optional description). The dataset covers the THM Friedberg campus buildings
+(Wilhelm-Leuschner-Straße 13, 61169 Friedberg) using the real building codes A1–A8, B1–B2,
+C1 and the Mensa. Codes and coordinates are sourced from the OpenStreetMap mapping of the
+campus (building centroids); the data layer is structured so any building can be refined in
+one place without code changes elsewhere.
 
 ---
 

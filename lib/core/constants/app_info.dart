@@ -13,14 +13,12 @@ class AppInfo {
   static const String campusAddress =
       'Wilhelm-Leuschner-Straße 13, 61169 Friedberg (Hessen)';
 
-  /// Approximate geographic centre of the THM Friedberg campus.
-  ///
-  /// Used as the initial map camera target. Coordinates are approximate and
-  /// intended to be field-verified before production release.
-  static const LatLng campusCenter = LatLng(50.33780, 8.75230);
+  /// Geographic centre of the THM Friedberg campus (centroid of the mapped
+  /// campus buildings). Used as the initial map camera target.
+  static const LatLng campusCenter = LatLng(50.33020, 8.75851);
 
-  /// Default initial map zoom over campus.
-  static const double defaultMapZoom = 17.0;
+  /// Default initial map zoom over campus (frames the whole campus).
+  static const double defaultMapZoom = 16.5;
 
   /// OpenStreetMap attribution (required by the OSM tile usage policy).
   static const String osmAttribution = '© OpenStreetMap contributors';

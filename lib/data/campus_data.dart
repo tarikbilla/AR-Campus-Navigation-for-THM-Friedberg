@@ -2,96 +2,105 @@ import 'package:latlong2/latlong.dart';
 
 import 'models/campus_building.dart';
 
-/// On-device dataset of the main THM Friedberg campus buildings.
+/// On-device dataset of the THM Friedberg campus buildings.
 ///
-/// Coordinates are approximate and clustered around the campus centre. They are
-/// intended to be field-verified / GPS-surveyed before a production release.
-/// Keeping the data here means positions can be corrected in a single place
-/// without touching any UI or logic code.
+/// Campus: Wilhelm-Leuschner-Straße 13, 61169 Friedberg (Hessen).
+/// Building codes and coordinates are sourced from the OpenStreetMap mapping of
+/// the THM Friedberg campus (building centroids), so map and AR guidance point
+/// at the real buildings. They can be corrected in this single file without
+/// touching any UI or logic code.
 class CampusData {
   CampusData._();
 
   static const List<CampusBuilding> buildings = [
     CampusBuilding(
-      id: 'a',
-      code: 'A',
-      name: 'Main Building (Hauptgebäude)',
-      category: BuildingCategory.admin,
-      location: LatLng(50.33802, 8.75214),
+      id: 'a1',
+      code: 'A1',
+      name: 'A1 – Audimax',
+      category: BuildingCategory.lecture,
+      location: LatLng(50.3304588, 8.7593124),
       description:
-          'Central entrance, administration and student services (StudierendenService).',
+          'Audimax — the largest auditorium, used for major lectures and events.',
     ),
     CampusBuilding(
-      id: 'b',
-      code: 'B',
-      name: 'Lecture Halls (Hörsaalgebäude)',
+      id: 'a2',
+      code: 'A2',
+      name: 'A2',
       category: BuildingCategory.lecture,
-      location: LatLng(50.33769, 8.75288),
-      description: 'Main lecture halls and seminar rooms.',
+      location: LatLng(50.3299985, 8.7592217),
+      description: 'Lecture halls, seminar rooms and faculty offices.',
     ),
     CampusBuilding(
-      id: 'audimax',
-      code: 'AM',
-      name: 'Audimax',
+      id: 'a3',
+      code: 'A3',
+      name: 'A3',
       category: BuildingCategory.lecture,
-      location: LatLng(50.33745, 8.75201),
-      description: 'Largest auditorium, used for big lectures and events.',
+      location: LatLng(50.3301716, 8.7586823),
+      description: 'Lecture halls, seminar rooms and faculty offices.',
     ),
     CampusBuilding(
-      id: 'library',
-      code: 'BIB',
-      name: 'Library (Bibliothek)',
-      category: BuildingCategory.library,
-      location: LatLng(50.33818, 8.75285),
-      description: 'Campus library and quiet study spaces.',
+      id: 'a4',
+      code: 'A4',
+      name: 'A4',
+      category: BuildingCategory.lecture,
+      location: LatLng(50.3305911, 8.7587002),
+      description: 'Lecture halls, seminar rooms and faculty offices.',
     ),
     CampusBuilding(
-      id: 'c',
-      code: 'C',
-      name: 'Computer Science (Informatik)',
-      category: BuildingCategory.lab,
-      location: LatLng(50.33742, 8.75320),
-      description: 'Computer science labs and faculty offices.',
+      id: 'a5',
+      code: 'A5',
+      name: 'A5',
+      category: BuildingCategory.lecture,
+      location: LatLng(50.3295968, 8.7583034),
+      description: 'Lecture halls, seminar rooms and student services.',
     ),
     CampusBuilding(
-      id: 'd',
-      code: 'D',
-      name: 'Engineering Labs (Ingenieurlabore)',
-      category: BuildingCategory.lab,
-      location: LatLng(50.33705, 8.75258),
-      description: 'Electrical and mechanical engineering laboratories.',
-    ),
-    CampusBuilding(
-      id: 'mensa',
-      code: 'Mensa',
-      name: 'Cafeteria (Mensa)',
+      id: 'a6',
+      code: 'A6',
+      name: 'A6 – Mensa',
       category: BuildingCategory.dining,
-      location: LatLng(50.33835, 8.75180),
-      description: 'Student cafeteria and coffee bar.',
+      location: LatLng(50.3300014, 8.7581087),
+      description: 'Mensa — student cafeteria and dining.',
     ),
     CampusBuilding(
-      id: 'sport',
-      code: 'SH',
-      name: 'Sports Hall (Sporthalle)',
-      category: BuildingCategory.sports,
-      location: LatLng(50.33690, 8.75330),
-      description: 'Gymnasium and sports facilities.',
+      id: 'a7',
+      code: 'A7',
+      name: 'A7',
+      category: BuildingCategory.lab,
+      location: LatLng(50.3303380, 8.7578871),
+      description: 'Faculty offices and laboratories.',
     ),
     CampusBuilding(
-      id: 'workshop',
-      code: 'W',
-      name: 'Workshops (Werkstätten)',
+      id: 'a8',
+      code: 'A8',
+      name: 'A8',
+      category: BuildingCategory.lab,
+      location: LatLng(50.3301427, 8.7572974),
+      description: 'Faculty offices and laboratories.',
+    ),
+    CampusBuilding(
+      id: 'b1',
+      code: 'B1',
+      name: 'B1',
       category: BuildingCategory.facility,
-      location: LatLng(50.33760, 8.75360),
-      description: 'Technical workshops and prototyping facilities.',
+      location: LatLng(50.3313741, 8.7596245),
+      description: 'Departmental offices, labs and seminar rooms.',
     ),
     CampusBuilding(
-      id: 'verwaltung',
-      code: 'V',
-      name: 'Administration Annex (Verwaltung)',
-      category: BuildingCategory.admin,
-      location: LatLng(50.33812, 8.75150),
-      description: 'Additional administrative and examination offices.',
+      id: 'b2',
+      code: 'B2',
+      name: 'B2',
+      category: BuildingCategory.facility,
+      location: LatLng(50.3316722, 8.7603046),
+      description: 'Departmental offices, labs and seminar rooms.',
+    ),
+    CampusBuilding(
+      id: 'c1',
+      code: 'C1',
+      name: 'C1',
+      category: BuildingCategory.facility,
+      location: LatLng(50.3279030, 8.7562370),
+      description: 'Additional teaching and departmental building.',
     ),
   ];
 

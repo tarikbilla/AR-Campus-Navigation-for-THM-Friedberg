@@ -52,6 +52,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  flutter_native_splash: ^2.4.8
 
 # Adaptive + legacy launcher icon generation (run: dart run flutter_launcher_icons).
 flutter_launcher_icons:
@@ -61,6 +62,23 @@ flutter_launcher_icons:
   min_sdk_android: 24
   adaptive_icon_background: "#009640"
   adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+
+# Branded native splash so there is no black flash on cold start, in light OR
+# dark mode and on the Android 12+ splash API (run: dart run flutter_native_splash:create).
+flutter_native_splash:
+  color: "#009640"
+  color_dark: "#009640"
+  image: assets/icon/app_icon_foreground.png
+  image_dark: assets/icon/app_icon_foreground.png
+  android_12:
+    color: "#009640"
+    color_dark: "#009640"
+    image: assets/icon/app_icon_foreground.png
+    image_dark: assets/icon/app_icon_foreground.png
+  android: true
+  ios: false
+  web: false
+  fullscreen: false
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -72,6 +90,9 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/icon/app_icon_foreground.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

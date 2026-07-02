@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'core/constants/app_info.dart';
 import 'core/theme/app_theme.dart';
-import 'features/home/home_screen.dart';
+import 'features/splash/splash_screen.dart';
 
 /// Root application widget. No authentication, no onboarding wall — the app
-/// opens directly on the home screen.
+/// opens on a branded splash that fades straight into the home screen.
 class ThmCampusApp extends StatelessWidget {
   const ThmCampusApp({super.key});
 
@@ -17,7 +17,7 @@ class ThmCampusApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
-      home: const HomeScreen(),
+      home: const SplashScreen(),
     );
   }
 }

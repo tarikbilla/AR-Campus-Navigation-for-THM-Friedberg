@@ -113,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ModeCard(
                     title: 'Map Mode',
                     subtitle:
-                        'See your position and every campus building on an interactive map.',
+                        'See your position and get a walking route to any campus building.',
                     icon: Icons.map_outlined,
                     gradient: AppColors.brandGradient,
                     onTap: _openMap,
@@ -179,10 +179,10 @@ class _HomeScreenState extends State<HomeScreen> {
       case ArAvailability.unsupported:
         return 'AR is not supported on this device — Map mode still works.';
       case ArAvailability.needsInstall:
-        return 'Point your camera at the path and follow the arrow to a building.';
+        return 'Point your camera at the path and walk along the arrow to a building.';
       case ArAvailability.ready:
       case ArAvailability.unknown:
-        return 'Follow a live arrow through your camera straight to any building.';
+        return 'Walk along a live path through your camera straight to any building.';
     }
   }
 

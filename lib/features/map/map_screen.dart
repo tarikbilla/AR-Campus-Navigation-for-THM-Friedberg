@@ -446,19 +446,35 @@ class _RouteCard extends StatelessWidget {
     }
 
     final r = route!;
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _chip(theme, Icons.directions_walk, r.etaLabel),
-        const SizedBox(width: 10),
-        _chip(theme, Icons.route_outlined,
-            GeoUtils.formatDistance(r.distanceMeters)),
-        const SizedBox(width: 10),
-        if (r.isFallback)
-          Flexible(
-            child: Text('approx.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: scheme.onSurfaceVariant)),
-          ),
+        Row(
+          children: [
+            Icon(Icons.directions_walk, size: 15, color: scheme.primary),
+            const SizedBox(width: 6),
+            Text('Walking route',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                )),
+            if (r.isFallback) ...[
+              const SizedBox(width: 6),
+              Text('(approx.)',
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: scheme.onSurfaceVariant)),
+            ],
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _chip(theme, Icons.schedule, r.etaLabel),
+            const SizedBox(width: 10),
+            _chip(theme, Icons.straighten,
+                GeoUtils.formatDistance(r.distanceMeters)),
+          ],
+        ),
       ],
     );
   }

@@ -30,6 +30,10 @@ The app requires **no account, no login and no registration** — the user opens
 immediately starts navigating. It is designed to be published on the Google Play Store and
 to fully comply with Play Store policies.
 
+The app provides **walking directions only**: it targets pedestrians moving on foot around
+the campus, so all routes, distances and ETAs are computed for walking (there are no driving
+or cycling modes).
+
 ---
 
 ## 2. Problem Statement & Motivation

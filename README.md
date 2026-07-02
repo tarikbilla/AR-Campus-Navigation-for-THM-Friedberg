@@ -8,6 +8,9 @@ distance onto the camera view so you can *follow the arrow* straight to any buil
 Built with **Flutter** (Android) and **Google ARCore**. No account, no login — just open
 the app and start navigating.
 
+> **Walking directions only.** The app is designed for pedestrians moving on foot around the
+> campus; all routes, distances and ETAs are for walking (no driving/cycling modes).
+
 > Module: Augmented Reality — Summer Semester 2026 · Team: Tarik Billa · Sai Radhika Mitta
 > Supervisors: Prof. Dr.-Ing. Hartmut Weber · M.Sc. Severin Stahl
 
@@ -103,7 +106,7 @@ signing config in `android/app/build.gradle.kts` with your own upload key.
 | Internet | Load OpenStreetMap map tiles |
 
 No personal data is collected, stored off-device, or shared. Location and camera are
-processed on-device in real time. See [`PRD.md`](PRD.md) for the full product requirements.
+processed on-device in real time. See [`docs/PRD.md`](docs/PRD.md) for the full product requirements.
 
 ## Notes on campus data
 

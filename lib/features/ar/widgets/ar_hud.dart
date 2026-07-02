@@ -212,7 +212,7 @@ class ArHud extends StatelessWidget {
                                 const Icon(Icons.directions_walk,
                                     color: Colors.white70, size: 14),
                                 const SizedBox(width: 4),
-                                Text(route!.etaLabel,
+                                Text('${route!.etaLabel} walk',
                                     style: theme.textTheme.bodySmall?.copyWith(
                                         color: Colors.white,
                                         fontWeight: FontWeight.w700)),

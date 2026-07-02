@@ -1,0 +1,60 @@
+                                 PROJECT PROPOSAL
+
+        AR Campus Navigation for THM Friedberg
+An augmented-reality wayfinding assistant that guides students and visitors across the THM
+                                 campus in Friedberg.
+
+
+Module                      Augmented Reality - Summer Semester 2026
+Supervisors                 Prof. Dr.-Ing. Hartmut Weber · M.Sc. Severin Stahl
+Project team                Tarik Billa · Sai Radhika Mitta
+Framework                   Google ARCore (Android)
+Core sensors                GPS, compass / orientation sensors, camera
+
+1. Project Description
+This project is an Augmented Reality campus navigation application for the THM campus in
+Friedberg, developed with the ARCore framework on Android. Using the smartphone’s GPS,
+compass and camera, the app first displays the user’s live position relative to the campus
+buildings on a map, and then, in AR mode, overlays directional indicators and route guidance
+directly onto the camera view of the real path ahead. This gives first-semester students,
+applicants and visitors a concrete everyday advantage: they can quickly find the correct
+building and entrance without prior knowledge of the campus layout. In a later development
+stage the system is intended to be extended toward indoor guidance for locating specific floors
+and rooms.
+
+2. Motivation and User Advantage
+Finding the right building, entrance or lecture hall on an unfamiliar campus is a common and
+stressful problem, particularly for new students during their first days and for external visitors
+attending events or examinations. Conventional maps and static signage require the user to
+mentally translate a top-down plan into the real world, which is error-prone and slow. By
+anchoring guidance to the user’s actual position and turning the live camera view into an
+intuitive follow-the-arrow experience, the application removes this translation step and makes
+orientation on campus noticeably faster, clearer and more confident.
+
+3. System Architecture
+The application follows a simple, robust pipeline. Three device sensors provide the raw input,
+a single processing stage derives the user’s position together with the bearing and distance to
+each stored campus building, and the result is presented through two complementary navigation
+modes.
+              Figure 1: High-level system architecture of the AR campus navigation application.
+
+4. Scope and Development Phases
+To keep the project realistic within the available time, the work is divided into two committed
+phases and one optional outlook:
+   1. Map mode – display a campus map showing the user’s GPS position together with the
+      locations of the main THM Friedberg buildings as markers.
+   2. AR camera mode – open the camera and overlay directional indicators and distance
+      toward the selected building directly onto the live view of the path ahead.
+   3. Future extension (outlook) – indoor navigation to locate specific floors and rooms once
+      a building has been reached.
+
+5. Expected Outcome
+The intended deliverable is a working Android prototype that reliably guides a user between
+the main buildings of the THM Friedberg campus in both map and AR mode. Success is
+measured by the app correctly indicating the direction and distance to a chosen building from
+arbitrary positions on campus, so that a person unfamiliar with the site can reach the target
+entrance without additional help.
+
+Note: Phases 1 and 2 constitute the core deliverable for the available project time. The indoor-navigation
+extension is documented as an outlook and is not part of the committed scope.
+

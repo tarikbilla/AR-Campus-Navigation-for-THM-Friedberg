@@ -26,6 +26,28 @@ class RouteRenderer {
 
     private val halfWidth = 0.55f // ribbon half-width in metres
 
+    // Reused across frames to avoid per-frame direct-buffer allocation (GC churn).
+    private var posBuf: FloatBuffer? = null
+    private var distBuf: FloatBuffer? = null
+    private var capacityVerts = 0
+
+    private fun ensureCapacity(stripVerts: Int) {
+        if (posBuf != null && capacityVerts >= stripVerts) {
+            posBuf!!.clear()
+            distBuf!!.clear()
+            return
+        }
+        capacityVerts = stripVerts
+        posBuf = ByteBuffer
+            .allocateDirect(stripVerts * 3 * FLOAT_SIZE)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        distBuf = ByteBuffer
+            .allocateDirect(stripVerts * FLOAT_SIZE)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+    }
+
     fun createOnGlThread() {
         program = ShaderUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
         positionAttrib = GLES20.glGetAttribLocation(program, "a_Position")
@@ -46,14 +68,9 @@ class RouteRenderer {
         if (count < 2) return
 
         val stripVerts = count * 2
-        val posBuf = ByteBuffer
-            .allocateDirect(stripVerts * 3 * FLOAT_SIZE)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-        val distBuf = ByteBuffer
-            .allocateDirect(stripVerts * FLOAT_SIZE)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
+        ensureCapacity(stripVerts)
+        val posBuf = this.posBuf!!
+        val distBuf = this.distBuf!!
 
         var cumDist = 0f
         for (i in 0 until count) {

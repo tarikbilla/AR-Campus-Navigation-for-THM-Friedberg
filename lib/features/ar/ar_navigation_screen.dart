@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/theme/app_colors.dart';
@@ -52,6 +53,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
   bool _routeFetching = false;
   LatLng? _routeOrigin;
   String? _routeTargetId;
+  bool _arrivedNotified = false;
 
   @override
   void initState() {
@@ -122,6 +124,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
         });
         _maybeSendPose();
         _maybeFetchRoute();
+        _checkArrival();
       });
     }
 
@@ -178,6 +181,19 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
     _arController?.setRoute(route.points, target.location);
   }
 
+  void _checkArrival() {
+    final t = _target;
+    final p = _position;
+    if (t == null || p == null) return;
+    final d = GeoUtils.distanceMeters(p.location, t.location);
+    if (d <= 12 && !_arrivedNotified) {
+      _arrivedNotified = true;
+      HapticFeedback.mediumImpact();
+    } else if (d > 20) {
+      _arrivedNotified = false;
+    }
+  }
+
   CampusBuilding _nearestTo(UserPosition p) {
     final list = List<CampusBuilding>.from(CampusData.buildings);
     list.sort((a, b) => GeoUtils.distanceMeters(p.location, a.location)
@@ -193,10 +209,12 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
       title: 'Navigate to…',
     );
     if (chosen != null && mounted) {
+      HapticFeedback.selectionClick();
       setState(() {
         _target = chosen;
         _route = null;
         _routeTargetId = null;
+        _arrivedNotified = false;
       });
       _arController?.clearRoute();
       _maybeFetchRoute();

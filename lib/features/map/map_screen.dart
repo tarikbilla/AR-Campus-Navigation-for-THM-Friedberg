@@ -1,7 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/app_info.dart';
 import '../../core/theme/app_colors.dart';
@@ -31,7 +33,7 @@ class MapScreen extends StatefulWidget {
 }
 
 class _MapScreenState extends State<MapScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final MapController _mapController = MapController();
   final LocationService _location = LocationService();
   final PermissionService _permissions = const PermissionService();
@@ -44,15 +46,11 @@ class _MapScreenState extends State<MapScreen>
   bool _routeLoading = false;
   bool _locationDenied = false;
 
-  late final AnimationController _flow;
+  AnimationController? _moveCtrl;
 
   @override
   void initState() {
     super.initState();
-    _flow = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
     _startLocation();
     final focus = CampusData.byId(widget.focusBuildingId);
     if (focus != null) {
@@ -64,8 +62,59 @@ class _MapScreenState extends State<MapScreen>
   void dispose() {
     _positionSub?.cancel();
     _location.dispose();
-    _flow.dispose();
+    _moveCtrl?.dispose();
     super.dispose();
+  }
+
+  /// Smoothly animates the map camera to [dest]/[zoom] via the controller so the
+  /// widget tree is never rebuilt for the movement. Yields to the user if they
+  /// start a gesture (see [_cancelMove]).
+  void _animatedMove(LatLng dest, double zoom) {
+    final MapCamera camera;
+    try {
+      camera = _mapController.camera;
+    } catch (_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          _mapController.move(dest, zoom);
+        } catch (_) {}
+      });
+      return;
+    }
+
+    _moveCtrl?.dispose();
+    final latTween = Tween<double>(
+        begin: camera.center.latitude, end: dest.latitude);
+    final lngTween = Tween<double>(
+        begin: camera.center.longitude, end: dest.longitude);
+    final zoomTween = Tween<double>(begin: camera.zoom, end: zoom);
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
+    _moveCtrl = controller;
+    final curved = CurvedAnimation(
+        parent: controller, curve: Curves.easeInOutCubic);
+    controller.addListener(() {
+      _mapController.move(
+        LatLng(latTween.evaluate(curved), lngTween.evaluate(curved)),
+        zoomTween.evaluate(curved),
+      );
+    });
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        controller.dispose();
+        if (identical(_moveCtrl, controller)) _moveCtrl = null;
+      }
+    });
+    controller.forward();
+  }
+
+  void _cancelMove() {
+    _moveCtrl?.stop();
+    _moveCtrl?.dispose();
+    _moveCtrl = null;
   }
 
   Future<void> _startLocation() async {
@@ -88,11 +137,12 @@ class _MapScreenState extends State<MapScreen>
   }
 
   void _recenter() {
+    HapticFeedback.selectionClick();
     final pos = _userPosition;
     if (pos != null) {
-      _mapController.move(pos.location, 18);
+      _animatedMove(pos.location, 18);
     } else {
-      _mapController.move(AppInfo.campusCenter, AppInfo.defaultMapZoom);
+      _animatedMove(AppInfo.campusCenter, AppInfo.defaultMapZoom);
       if (_locationDenied) _promptEnableLocation();
     }
   }
@@ -117,12 +167,13 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Future<void> _selectBuilding(CampusBuilding b) async {
+    HapticFeedback.selectionClick();
     setState(() {
       _selected = b;
       _route = null;
       _routeLoading = true;
     });
-    _mapController.move(b.location, 18);
+    _animatedMove(b.location, 18);
     await _loadRoute(b);
   }
 
@@ -143,12 +194,18 @@ class _MapScreenState extends State<MapScreen>
 
   void _fitRoute(WalkingRoute route) {
     if (route.points.length < 2) return;
-    _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: LatLngBounds.fromPoints(route.points),
-        padding: const EdgeInsets.fromLTRB(50, 120, 50, 230),
-      ),
-    );
+    // Cancel any in-flight select animation so it doesn't fight the fit.
+    _cancelMove();
+    try {
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(route.points),
+          padding: const EdgeInsets.fromLTRB(50, 120, 50, 230),
+        ),
+      );
+    } catch (_) {
+      // Map not ready; ignore.
+    }
   }
 
   void _clearSelection() {
@@ -226,23 +283,21 @@ class _MapScreenState extends State<MapScreen>
   }
 
   Widget _buildMap() {
-    // Only rebuild on the flow animation while a route is actually shown, so
-    // the map isn't repainted every frame when idle.
-    if (_route == null) return _mapContent(0);
-    return AnimatedBuilder(
-      animation: _flow,
-      builder: (context, _) => _mapContent(_flow.value),
-    );
-  }
-
-  Widget _mapContent(double flow) {
+    // The map is rebuilt only on genuine state changes (route set/cleared,
+    // position, selection) — never per animation frame. Route/marker animation
+    // lives inside the marker widgets themselves, and camera movement goes
+    // through the controller, so gestures (pinch-zoom / pan) stay smooth.
     return FlutterMap(
       mapController: _mapController,
-      options: const MapOptions(
+      options: MapOptions(
         initialCenter: AppInfo.campusCenter,
         initialZoom: AppInfo.defaultMapZoom,
         minZoom: 3,
         maxZoom: 19,
+        // A user gesture cancels any in-flight programmatic camera animation.
+        onPositionChanged: (camera, hasGesture) {
+          if (hasGesture) _cancelMove();
+        },
       ),
       children: [
         TileLayer(
@@ -253,7 +308,6 @@ class _MapScreenState extends State<MapScreen>
         if (_route != null)
           ...buildRouteLayers(
             route: _route!,
-            flow: flow,
             scheme: Theme.of(context).colorScheme,
           ),
         if (_userPosition != null)

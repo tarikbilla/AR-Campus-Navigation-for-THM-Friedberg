@@ -9,11 +9,14 @@ import '../../../core/utils/geo_utils.dart';
 import '../../../data/models/walking_route.dart';
 
 /// Builds the flutter_map layers that visualise a walking [WalkingRoute]:
-/// a casing + gradient line, direction chevrons, an animated "comet" that
-/// travels the path, and origin / destination markers.
+/// a casing + gradient line, a flowing wave of direction chevrons, and
+/// origin / destination markers.
+///
+/// Every animated element animates *itself* (its own controller), so the map
+/// widget tree never has to rebuild for the animation — this keeps gestures
+/// (pinch-zoom / pan) smooth and crash-free.
 List<Widget> buildRouteLayers({
   required WalkingRoute route,
-  required double flow, // 0..1 animation phase
   required ColorScheme scheme,
 }) {
   final pts = route.points;
@@ -28,17 +31,11 @@ List<Widget> buildRouteLayers({
           strokeWidth: 8,
           borderStrokeWidth: 3,
           borderColor: Colors.white,
-          gradientColors: [AppColors.brand, AppColors.accent],
+          gradientColors: const [AppColors.brand, AppColors.accent],
         ),
       ],
     ),
     MarkerLayer(markers: _chevrons(pts, cum, total)),
-    if (total > 0)
-      MarkerLayer(
-        markers: [
-          _comet(pts, cum, total, flow),
-        ],
-      ),
     MarkerLayer(
       markers: [
         Marker(
@@ -49,8 +46,8 @@ List<Widget> buildRouteLayers({
         ),
         Marker(
           point: route.destination,
-          width: 40,
-          height: 46,
+          width: 54,
+          height: 60,
           alignment: Alignment.topCenter,
           child: const _DestinationFlag(),
         ),
@@ -87,64 +84,87 @@ LatLng _pointAtDistance(List<LatLng> pts, List<double> cum, double d) {
 
 List<Marker> _chevrons(List<LatLng> pts, List<double> cum, double total) {
   final markers = <Marker>[];
-  const spacing = 28.0; // metres between chevrons
+  const spacing = 26.0; // metres between chevrons
   if (total < spacing) return markers;
+  int index = 0;
+  final int count = ((total - 6) / spacing).floor();
   for (double d = spacing; d < total - 6; d += spacing) {
     final p = _pointAtDistance(pts, cum, d);
     final ahead = _pointAtDistance(pts, cum, math.min(d + 4, total));
     final bearing = GeoUtils.bearingDegrees(p, ahead);
+    final double phase = count <= 0 ? 0 : index / count;
     markers.add(
       Marker(
         point: p,
-        width: 20,
-        height: 20,
-        child: Transform.rotate(
-          angle: bearing * math.pi / 180.0,
-          child: const Icon(Icons.navigation, size: 15, color: Colors.white),
-        ),
+        width: 22,
+        height: 22,
+        child: _FlowChevron(bearingDeg: bearing, phase: phase),
       ),
     );
+    index++;
   }
   return markers;
 }
 
-Marker _comet(List<LatLng> pts, List<double> cum, double total, double flow) {
-  final d = (flow % 1.0) * total;
-  final p = _pointAtDistance(pts, cum, d);
-  return Marker(
-    point: p,
-    width: 26,
-    height: 26,
-    child: const _CometDot(),
-  );
+/// A single direction chevron that brightens as a wave sweeps along the route
+/// from origin to destination, giving a sense of forward flow.
+class _FlowChevron extends StatefulWidget {
+  const _FlowChevron({required this.bearingDeg, required this.phase});
+
+  final double bearingDeg;
+  final double phase; // 0 at origin .. 1 at destination
+
+  @override
+  State<_FlowChevron> createState() => _FlowChevronState();
 }
 
-class _CometDot extends StatelessWidget {
-  const _CometDot();
+class _FlowChevronState extends State<_FlowChevron>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.accent.withValues(alpha: 0.9),
-            blurRadius: 12,
-            spreadRadius: 3,
-          ),
-        ],
-      ),
-      child: Center(
-        child: Container(
-          width: 12,
-          height: 12,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            color: AppColors.accent,
-          ),
-        ),
+    return Transform.rotate(
+      angle: widget.bearingDeg * math.pi / 180.0,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          // Distance of this chevron's phase from the travelling wave head.
+          double d = (_controller.value - widget.phase).abs();
+          d = math.min(d, 1 - d);
+          final double glow = math.max(0.0, 1 - d * 5);
+          final double opacity = 0.35 + 0.65 * glow;
+          final double scale = 0.85 + 0.35 * glow;
+          return Opacity(
+            opacity: opacity,
+            child: Transform.scale(
+              scale: scale,
+              child: Icon(
+                Icons.navigation,
+                size: 16,
+                color: Color.lerp(Colors.white, AppColors.accent, glow),
+                shadows: const [
+                  Shadow(color: Colors.black45, blurRadius: 3),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -168,28 +188,75 @@ class _OriginDot extends StatelessWidget {
   }
 }
 
-class _DestinationFlag extends StatelessWidget {
+/// Destination marker with a self-animating pulse ring.
+class _DestinationFlag extends StatefulWidget {
   const _DestinationFlag();
+
+  @override
+  State<_DestinationFlag> createState() => _DestinationFlagState();
+}
+
+class _DestinationFlagState extends State<_DestinationFlag>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: AppColors.accent,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-            boxShadow: [
-              BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.3), blurRadius: 6),
-            ],
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            final double t = _controller.value;
+            return Stack(
+              alignment: Alignment.center,
+              children: [
+                Opacity(
+                  opacity: (1 - t) * 0.5,
+                  child: Container(
+                    width: 20 + t * 22,
+                    height: 20 + t * 22,
+                    decoration: const BoxDecoration(
+                      color: AppColors.accent,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+                child!,
+              ],
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: AppColors.accent,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.3), blurRadius: 6),
+              ],
+            ),
+            child: const Icon(Icons.flag, color: Colors.white, size: 16),
           ),
-          child: const Icon(Icons.flag, color: Colors.white, size: 16),
         ),
-        Container(width: 2, height: 10, color: Colors.white),
+        Container(width: 2, height: 8, color: Colors.white),
       ],
     );
   }

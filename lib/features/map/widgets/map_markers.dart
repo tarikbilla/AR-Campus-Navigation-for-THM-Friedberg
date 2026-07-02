@@ -90,26 +90,72 @@ class _PinTailPainter extends CustomPainter {
       oldDelegate.color != color;
 }
 
-/// The user's current-location marker (pulsing blue dot).
-class UserLocationDot extends StatelessWidget {
+/// The user's current-location marker: a blue dot with a soft, self-animating
+/// pulse ring. It animates itself so the map never has to rebuild.
+class UserLocationDot extends StatefulWidget {
   const UserLocationDot({super.key});
 
   @override
+  State<UserLocationDot> createState() => _UserLocationDotState();
+}
+
+class _UserLocationDotState extends State<UserLocationDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  static const Color _blue = Color(0xFF1A73E8);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    const blue = Color(0xFF1A73E8);
-    return Center(
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final double t = _controller.value;
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Opacity(
+              opacity: (1 - t) * 0.4,
+              child: Container(
+                width: 12 + t * 24,
+                height: 12 + t * 24,
+                decoration: const BoxDecoration(
+                  color: _blue,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            child!,
+          ],
+        );
+      },
       child: Container(
-        width: 22,
-        height: 22,
+        width: 18,
+        height: 18,
         decoration: BoxDecoration(
-          color: blue,
+          color: _blue,
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 3),
           boxShadow: [
             BoxShadow(
-              color: blue.withValues(alpha: 0.5),
-              blurRadius: 12,
-              spreadRadius: 2,
+              color: _blue.withValues(alpha: 0.5),
+              blurRadius: 8,
+              spreadRadius: 1,
             ),
           ],
         ),

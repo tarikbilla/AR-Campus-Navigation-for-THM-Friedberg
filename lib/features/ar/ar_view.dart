@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/constants/app_info.dart';
 
@@ -26,12 +27,64 @@ class ArStatus {
       ArStatus(trackingState: 'initializing', planeCount: 0);
 }
 
-/// Hosts the native ARCore camera/plane-detection view using Android hybrid
-/// composition (required for a smooth camera + OpenGL surface).
+/// Imperative handle to the native ARCore view: pushes the walking route and
+/// live device pose (GPS + heading) so the native side can draw the path on the
+/// ground, geo-aligned to the real world.
+class ArViewController {
+  ArViewController._(this._channel);
+
+  final MethodChannel _channel;
+
+  /// Sends the full route polyline (origin→destination) plus the destination.
+  Future<void> setRoute(List<LatLng> points, LatLng destination) {
+    return _invoke('setRoute', {
+      'points': [
+        for (final p in points) [p.latitude, p.longitude],
+      ],
+      'destLat': destination.latitude,
+      'destLng': destination.longitude,
+    });
+  }
+
+  /// Streams the latest device position + compass heading (degrees from north).
+  Future<void> updatePose({
+    required double lat,
+    required double lng,
+    required double heading,
+    double accuracy = 0,
+  }) {
+    return _invoke('updatePose', {
+      'lat': lat,
+      'lng': lng,
+      'heading': heading,
+      'accuracy': accuracy,
+    });
+  }
+
+  Future<void> clearRoute() => _invoke('clearRoute', null);
+
+  Future<void> _invoke(String method, Object? args) async {
+    try {
+      await _channel.invokeMethod(method, args);
+    } on PlatformException {
+      // Native side may not be ready yet; safe to ignore transient failures.
+    } on MissingPluginException {
+      // View detached.
+    }
+  }
+}
+
+/// Hosts the native ARCore camera / plane-detection / route view using Android
+/// hybrid composition (required for a smooth camera + OpenGL surface).
 class ArCameraView extends StatefulWidget {
-  const ArCameraView({super.key, this.onStatus});
+  const ArCameraView({
+    super.key,
+    this.onStatus,
+    this.onControllerCreated,
+  });
 
   final ValueChanged<ArStatus>? onStatus;
+  final ValueChanged<ArViewController>? onControllerCreated;
 
   @override
   State<ArCameraView> createState() => _ArCameraViewState();
@@ -80,6 +133,7 @@ class _ArCameraViewState extends State<ArCameraView> {
     final channel = MethodChannel('${AppInfo.arChannel}/view_$id');
     channel.setMethodCallHandler(_handleCall);
     _channel = channel;
+    widget.onControllerCreated?.call(ArViewController._(channel));
   }
 
   Future<dynamic> _handleCall(MethodCall call) async {

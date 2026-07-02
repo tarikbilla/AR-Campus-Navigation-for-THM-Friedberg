@@ -4,17 +4,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 
 import '../../core/constants/app_info.dart';
+import '../../core/theme/app_colors.dart';
+import '../../core/utils/geo_utils.dart';
 import '../../data/campus_data.dart';
 import '../../data/models/campus_building.dart';
+import '../../data/models/walking_route.dart';
 import '../../services/location_service.dart';
 import '../../services/permission_service.dart';
+import '../../services/routing_service.dart';
 import '../../widgets/building_list_sheet.dart';
 import '../ar/ar_navigation_screen.dart';
-import 'widgets/building_info_sheet.dart';
 import 'widgets/map_markers.dart';
+import 'widgets/route_overlay.dart';
 
 /// Map mode: an interactive OpenStreetMap of the THM Friedberg campus showing
-/// the user's live position and every main building as a tappable marker.
+/// the user's live position, every building as a tappable marker, and a
+/// road-following walking route to the selected building.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key, this.focusBuildingId});
 
@@ -25,26 +30,33 @@ class MapScreen extends StatefulWidget {
   State<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends State<MapScreen> {
+class _MapScreenState extends State<MapScreen>
+    with SingleTickerProviderStateMixin {
   final MapController _mapController = MapController();
   final LocationService _location = LocationService();
   final PermissionService _permissions = const PermissionService();
+  final RoutingService _routing = RoutingService();
 
   StreamSubscription<UserPosition>? _positionSub;
   UserPosition? _userPosition;
   CampusBuilding? _selected;
+  WalkingRoute? _route;
+  bool _routeLoading = false;
   bool _locationDenied = false;
+
+  late final AnimationController _flow;
 
   @override
   void initState() {
     super.initState();
-    _selected = CampusData.byId(widget.focusBuildingId);
+    _flow = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 3),
+    )..repeat();
     _startLocation();
-    if (_selected != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _mapController.move(_selected!.location, 18);
-        _showBuildingSheet(_selected!);
-      });
+    final focus = CampusData.byId(widget.focusBuildingId);
+    if (focus != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _selectBuilding(focus));
     }
   }
 
@@ -52,6 +64,7 @@ class _MapScreenState extends State<MapScreen> {
   void dispose() {
     _positionSub?.cancel();
     _location.dispose();
+    _flow.dispose();
     super.dispose();
   }
 
@@ -103,30 +116,46 @@ class _MapScreenState extends State<MapScreen> {
     );
   }
 
-  void _selectBuilding(CampusBuilding b) {
-    setState(() => _selected = b);
+  Future<void> _selectBuilding(CampusBuilding b) async {
+    setState(() {
+      _selected = b;
+      _route = null;
+      _routeLoading = true;
+    });
     _mapController.move(b.location, 18);
-    _showBuildingSheet(b);
+    await _loadRoute(b);
   }
 
-  void _showBuildingSheet(CampusBuilding b) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (_) => BuildingInfoSheet(
-        building: b,
-        userLocation: _userPosition?.location,
-        onNavigateAr: () {
-          Navigator.of(context).pop();
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => ArNavigationScreen(targetBuildingId: b.id),
-            ),
-          );
-        },
+  Future<void> _loadRoute(CampusBuilding b) async {
+    final user = _userPosition?.location;
+    if (user == null) {
+      if (mounted) setState(() => _routeLoading = false);
+      return;
+    }
+    final route = await _routing.route(user, b.location);
+    if (!mounted || _selected?.id != b.id) return;
+    setState(() {
+      _route = route;
+      _routeLoading = false;
+    });
+    _fitRoute(route);
+  }
+
+  void _fitRoute(WalkingRoute route) {
+    if (route.points.length < 2) return;
+    _mapController.fitCamera(
+      CameraFit.bounds(
+        bounds: LatLngBounds.fromPoints(route.points),
+        padding: const EdgeInsets.fromLTRB(50, 120, 50, 230),
       ),
-    ).whenComplete(() {
-      if (mounted) setState(() => _selected = null);
+    );
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selected = null;
+      _route = null;
+      _routeLoading = false;
     });
   }
 
@@ -137,6 +166,16 @@ class _MapScreenState extends State<MapScreen> {
       selectedId: _selected?.id,
     );
     if (chosen != null) _selectBuilding(chosen);
+  }
+
+  void _openArForSelected() {
+    final b = _selected;
+    if (b == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ArNavigationScreen(targetBuildingId: b.id),
+      ),
+    );
   }
 
   @override
@@ -156,19 +195,47 @@ class _MapScreenState extends State<MapScreen> {
         children: [
           _buildMap(),
           if (_locationDenied) _buildLocationBanner(),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _selected == null
+                ? const SizedBox.shrink()
+                : _RouteCard(
+                    building: _selected!,
+                    route: _route,
+                    loading: _routeLoading,
+                    hasUser: _userPosition != null,
+                    onClose: _clearSelection,
+                    onNavigateAr: _openArForSelected,
+                  ),
+          ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _recenter,
-        tooltip: 'Recenter on me',
-        child: Icon(_userPosition != null
-            ? Icons.my_location
-            : Icons.location_searching),
+      floatingActionButton: Padding(
+        padding: EdgeInsets.only(bottom: _selected != null ? 172 : 0),
+        child: FloatingActionButton(
+          onPressed: _recenter,
+          tooltip: 'Recenter on me',
+          child: Icon(_userPosition != null
+              ? Icons.my_location
+              : Icons.location_searching),
+        ),
       ),
     );
   }
 
   Widget _buildMap() {
+    // Only rebuild on the flow animation while a route is actually shown, so
+    // the map isn't repainted every frame when idle.
+    if (_route == null) return _mapContent(0);
+    return AnimatedBuilder(
+      animation: _flow,
+      builder: (context, _) => _mapContent(_flow.value),
+    );
+  }
+
+  Widget _mapContent(double flow) {
     return FlutterMap(
       mapController: _mapController,
       options: const MapOptions(
@@ -183,6 +250,12 @@ class _MapScreenState extends State<MapScreen> {
           userAgentPackageName: 'net.godevs.thmcampusnav',
           maxZoom: 19,
         ),
+        if (_route != null)
+          ...buildRouteLayers(
+            route: _route!,
+            flow: flow,
+            scheme: Theme.of(context).colorScheme,
+          ),
         if (_userPosition != null)
           MarkerLayer(
             markers: [
@@ -251,6 +324,180 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Persistent bottom navigation card for the selected building.
+class _RouteCard extends StatelessWidget {
+  const _RouteCard({
+    required this.building,
+    required this.route,
+    required this.loading,
+    required this.hasUser,
+    required this.onClose,
+    required this.onNavigateAr,
+  });
+
+  final CampusBuilding building;
+  final WalkingRoute? route;
+  final bool loading;
+  final bool hasUser;
+  final VoidCallback onClose;
+  final VoidCallback onNavigateAr;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(16, 14, 12, 16),
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 24,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(building.category.icon,
+                      color: scheme.onPrimaryContainer),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(building.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium),
+                      Text(building.category.label,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          )),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: onClose,
+                  icon: const Icon(Icons.close),
+                  tooltip: 'Clear route',
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            _stats(theme),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onNavigateAr,
+                icon: const Icon(Icons.view_in_ar_outlined),
+                label: const Text('Navigate in AR'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _stats(ThemeData theme) {
+    final scheme = theme.colorScheme;
+
+    if (!hasUser) {
+      return _pill(theme, Icons.location_off_outlined,
+          'Enable location to get a walking route');
+    }
+    if (loading || route == null) {
+      return Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 12),
+          Text('Finding the best walking route…',
+              style: theme.textTheme.bodyMedium),
+        ],
+      );
+    }
+
+    final r = route!;
+    return Row(
+      children: [
+        _chip(theme, Icons.directions_walk, r.etaLabel),
+        const SizedBox(width: 10),
+        _chip(theme, Icons.route_outlined,
+            GeoUtils.formatDistance(r.distanceMeters)),
+        const SizedBox(width: 10),
+        if (r.isFallback)
+          Flexible(
+            child: Text('approx.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: scheme.onSurfaceVariant)),
+          ),
+      ],
+    );
+  }
+
+  Widget _chip(ThemeData theme, IconData icon, String label) {
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 6),
+          Text(label,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: scheme.onSecondaryContainer,
+                fontWeight: FontWeight.w700,
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _pill(ThemeData theme, IconData icon, String label) {
+    final scheme = theme.colorScheme;
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppColors.warning),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(label,
+              style: theme.textTheme.bodyMedium
+                  ?.copyWith(color: scheme.onSurfaceVariant)),
+        ),
+      ],
     );
   }
 }

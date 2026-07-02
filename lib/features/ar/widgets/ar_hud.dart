@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/geo_utils.dart';
 import '../../../data/models/campus_building.dart';
+import '../../../data/models/walking_route.dart';
 import '../ar_view.dart';
 import 'direction_arrow.dart';
 
@@ -16,6 +17,7 @@ class ArHud extends StatelessWidget {
     super.key,
     required this.building,
     required this.status,
+    required this.route,
     required this.distanceMeters,
     required this.relativeDegrees,
     required this.bearingDegrees,
@@ -26,12 +28,19 @@ class ArHud extends StatelessWidget {
 
   final CampusBuilding building;
   final ArStatus status;
+  final WalkingRoute? route;
   final double? distanceMeters;
   final double? relativeDegrees;
   final double? bearingDegrees;
   final bool hasGuidance;
   final VoidCallback onChangeTarget;
   final VoidCallback onBack;
+
+  /// Prefers the walking-route distance; falls back to straight-line distance.
+  String get _primaryDistance {
+    final double? meters = route?.distanceMeters ?? distanceMeters;
+    return meters == null ? '—' : GeoUtils.formatDistance(meters);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,9 +191,7 @@ class ArHud extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
-                      distanceMeters == null
-                          ? '—'
-                          : GeoUtils.formatDistance(distanceMeters!),
+                      _primaryDistance,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 34,
@@ -195,12 +202,30 @@ class ArHud extends StatelessWidget {
                     const SizedBox(width: 12),
                     Padding(
                       padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        bearingDegrees == null
-                            ? 'to destination'
-                            : 'toward ${GeoUtils.compassLabel(bearingDegrees!)}',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: Colors.white70),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (route != null)
+                            Row(
+                              children: [
+                                const Icon(Icons.directions_walk,
+                                    color: Colors.white70, size: 14),
+                                const SizedBox(width: 4),
+                                Text(route!.etaLabel,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700)),
+                              ],
+                            ),
+                          Text(
+                            bearingDegrees == null
+                                ? 'to destination'
+                                : 'toward ${GeoUtils.compassLabel(bearingDegrees!)}',
+                            style: theme.textTheme.bodySmall
+                                ?.copyWith(color: Colors.white70),
+                          ),
+                        ],
                       ),
                     ),
                   ],

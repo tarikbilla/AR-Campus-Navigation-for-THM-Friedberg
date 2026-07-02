@@ -1,23 +1,27 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/utils/geo_utils.dart';
 import '../../data/campus_data.dart';
 import '../../data/models/campus_building.dart';
+import '../../data/models/walking_route.dart';
 import '../../services/ar_availability_service.dart';
 import '../../services/compass_service.dart';
 import '../../services/location_service.dart';
 import '../../services/permission_service.dart';
+import '../../services/routing_service.dart';
 import '../../widgets/building_list_sheet.dart';
 import 'ar_view.dart';
 import 'widgets/ar_hud.dart';
 
 enum _Stage { checking, cameraDenied, arUnsupported, needsInstall, ready }
 
-/// AR camera mode: opens an ARCore session with plane detection and overlays a
-/// directional arrow + distance toward the selected campus building.
+/// AR camera mode: opens an ARCore session with plane detection, draws the
+/// walking route on the ground and a beacon at the target building, and overlays
+/// a directional arrow + distance HUD.
 class ArNavigationScreen extends StatefulWidget {
   const ArNavigationScreen({super.key, this.targetBuildingId});
 
@@ -32,6 +36,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
   final ArAvailabilityService _ar = const ArAvailabilityService();
   final LocationService _location = LocationService();
   final CompassService _compass = CompassService();
+  final RoutingService _routing = RoutingService();
 
   StreamSubscription<UserPosition>? _positionSub;
   StreamSubscription<double>? _headingSub;
@@ -41,6 +46,12 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
   UserPosition? _position;
   double? _heading;
   CampusBuilding? _target;
+
+  ArViewController? _arController;
+  WalkingRoute? _route;
+  bool _routeFetching = false;
+  LatLng? _routeOrigin;
+  String? _routeTargetId;
 
   @override
   void initState() {
@@ -85,7 +96,6 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
         break;
       case ArAvailability.ready:
       case ArAvailability.unknown:
-        // Proceed; the native session will surface any hard failure.
         break;
     }
 
@@ -101,22 +111,71 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
           _position = first;
           _target ??= _nearestTo(first);
         });
+        _maybeSendPose();
+        _maybeFetchRoute();
       }
       _positionSub = _location.stream().listen((p) {
-        if (mounted) {
-          setState(() {
-            _position = p;
-            _target ??= _nearestTo(p);
-          });
-        }
+        if (!mounted) return;
+        setState(() {
+          _position = p;
+          _target ??= _nearestTo(p);
+        });
+        _maybeSendPose();
+        _maybeFetchRoute();
       });
     }
 
     if (_compass.isSupported) {
       _headingSub = _compass.stream().listen((h) {
-        if (mounted) setState(() => _heading = h);
+        if (!mounted) return;
+        setState(() => _heading = h);
+        _maybeSendPose();
       });
     }
+  }
+
+  void _onArController(ArViewController controller) {
+    _arController = controller;
+    final route = _route;
+    final target = _target;
+    if (route != null && target != null) {
+      controller.setRoute(route.points, target.location);
+    }
+    _maybeSendPose();
+  }
+
+  void _maybeSendPose() {
+    final p = _position;
+    final h = _heading;
+    if (p == null || h == null) return;
+    _arController?.updatePose(
+      lat: p.location.latitude,
+      lng: p.location.longitude,
+      heading: h,
+      accuracy: p.accuracyMeters,
+    );
+  }
+
+  Future<void> _maybeFetchRoute() async {
+    final target = _target;
+    final origin = _position?.location;
+    if (target == null || origin == null || _routeFetching) return;
+
+    final bool sameTarget = _routeTargetId == target.id;
+    final bool nearOrigin = _routeOrigin != null &&
+        GeoUtils.distanceMeters(origin, _routeOrigin!) < 25;
+    if (_route != null && sameTarget && nearOrigin) return;
+
+    _routeFetching = true;
+    final route = await _routing.route(origin, target.location);
+    _routeFetching = false;
+    if (!mounted || _target?.id != target.id) return;
+    setState(() {
+      _route = route;
+      _routeOrigin = origin;
+      _routeTargetId = target.id;
+    });
+    _arController?.setRoute(route.points, target.location);
   }
 
   CampusBuilding _nearestTo(UserPosition p) {
@@ -133,7 +192,15 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
       selectedId: _target?.id,
       title: 'Navigate to…',
     );
-    if (chosen != null && mounted) setState(() => _target = chosen);
+    if (chosen != null && mounted) {
+      setState(() {
+        _target = chosen;
+        _route = null;
+        _routeTargetId = null;
+      });
+      _arController?.clearRoute();
+      _maybeFetchRoute();
+    }
   }
 
   void _openMapInstead() {
@@ -206,6 +273,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
           onStatus: (s) {
             if (mounted) setState(() => _arStatus = s);
           },
+          onControllerCreated: _onArController,
         ),
         if (target == null)
           _centeredDark(
@@ -216,6 +284,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
           ArHud(
             building: target,
             status: _arStatus,
+            route: _route,
             distanceMeters: distance,
             relativeDegrees: relative,
             bearingDegrees: bearing,

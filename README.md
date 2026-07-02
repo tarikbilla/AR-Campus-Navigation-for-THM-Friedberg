@@ -16,11 +16,16 @@ the app and start navigating.
 ## Features
 
 - 🗺️ **Map Mode** — interactive OpenStreetMap of the campus with your live position and
-  tappable building markers; tap a building for its distance, direction and details.
-- 📸 **AR Mode** — a real ARCore session with horizontal-plane detection; a glanceable HUD
-  overlays a directional arrow, live distance and turn guidance toward the selected building.
+  tappable building markers. Selecting a building draws a **road-following walking route**
+  (casing + gradient line, direction chevrons and an animated "comet") with live distance/ETA.
+- 📸 **AR Mode** — a real ARCore session with horizontal-plane detection that draws the walking
+  route as a **ground-hugging ribbon on the real path** with a flowing animation, plus a glowing
+  **beacon** at the destination and a directional arrow HUD. The path and beacon are geo-aligned,
+  so they stay locked to the world as you look around 360° — showing exactly which way to walk.
 - 🧭 Sensor fusion — GPS (position), compass (heading) and camera (ARCore) combined to compute
-  the bearing and distance to each building.
+  the bearing/distance and to project the route into the AR world frame.
+- 🧭 Routing — real pedestrian routes via the keyless OSRM foot service (the routing backend
+  used by openstreetmap.org), with a straight-line fallback when offline.
 - 🚪 **Zero friction** — no registration, no ads, no tracking; works offline for guidance
   (map tiles need connectivity).
 - 🎨 Professional Material 3 UI with light/dark themes and a THM-green identity.
@@ -35,6 +40,7 @@ implemented here. Indoor room-level navigation is documented as a future outlook
 | App framework | Flutter (Android target) |
 | Map | `flutter_map` + OpenStreetMap tiles (no API key) |
 | AR | Native **ARCore** (`com.google.ar:core`) via a Flutter hybrid-composition `PlatformView` |
+| Routing | Keyless OSRM foot service (`routing.openstreetmap.de`) via `http` |
 | Location | `geolocator` |
 | Orientation | `flutter_compass` |
 | Permissions | `permission_handler` |

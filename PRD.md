@@ -89,16 +89,22 @@ seconds, with no setup.
 - Let the user select a building to see its name, distance and bearing.
 - Provide a one-tap handoff into AR mode for the selected building.
 
+**Phase 1 — Map mode (routing)**
+- Draw a road-following walking route from the user's position to the selected building
+  (real pedestrian routing, keyless), with live walking distance and ETA.
+
 **Phase 2 — AR camera mode**
 - Open the live camera view via ARCore with plane detection.
-- Overlay a directional indicator (arrow) pointing toward the selected building.
-- Overlay the live distance to the building.
+- Draw the walking route as a ground-anchored ribbon on the real path, plus a beacon at the
+  destination, geo-aligned so they stay locked to the world while looking around 360°.
+- Overlay a directional indicator (arrow) pointing toward the selected building (which side).
+- Overlay the live distance / ETA to the building.
 - Provide clear turn guidance ("turn left / right / straight / behind you").
 - Re-select target building from within AR mode.
 
 ### 5.2 Out of scope (future outlook — **not** part of committed scope)
 - **Indoor navigation** to locate specific floors and rooms once a building is reached.
-- Turn-by-turn walking routes along footpaths (currently straight-line bearing guidance).
+- Voice turn-by-turn prompts and re-routing notifications.
 - iOS build, accounts, social features, cloud sync, analytics dashboards.
 
 > Note: Phases 1 and 2 constitute the core deliverable for the available project time. The
@@ -140,6 +146,7 @@ The application follows a simple, robust pipeline:
 |---|---|---|
 | App framework | **Flutter** (Android target) | Single professional UI codebase, fast iteration |
 | Map engine | **flutter_map + OpenStreetMap** | No API key, no billing, works on first launch — best fit for "just open and use" |
+| Routing | **OSRM foot** (`routing.openstreetmap.de`) | Keyless real pedestrian routing; straight-line fallback offline |
 | AR engine | **Native ARCore** (`com.google.ar:core`) via Flutter `PlatformView` | First-party, buildable on modern Gradle, real plane detection |
 | Location | **geolocator** | GPS position + accuracy |
 | Orientation | **flutter_compass** | Device heading for bearing/arrow |
@@ -148,11 +155,21 @@ The application follows a simple, robust pipeline:
 ### 6.2 AR implementation notes
 - AR mode is delivered as a native Kotlin `PlatformView` hosting an ARCore `Session` with
   horizontal-plane detection and an OpenGL renderer (camera background + detected planes +
-  world-anchored marker).
-- The directional **arrow, distance and turn instruction** are rendered as a Flutter overlay
-  on top of the camera view, driven by GPS bearing and the device compass heading.
+  world-anchored marker + route ribbon + destination beacon).
+- The walking route (from the routing service) and the live device pose (GPS + compass) are
+  streamed to the native side. Each frame it projects the route's geographic points into the
+  ARCore **world** frame using an East-North-Up projection whose rotation is derived from the
+  camera's own forward/right axes and the compass heading. This mapping is **rotation-invariant**,
+  so the on-ground path and the destination beacon stay locked to their real geographic
+  positions as the user pans the phone 360° — the arrow shows which side the building is on
+  while the path stays drawn on the road.
+- The directional **arrow, distance/ETA and turn instruction** are rendered as a Flutter
+  overlay on top of the camera view.
 - ARCore is declared **AR Optional** so the app installs on all devices; AR availability is
   checked at runtime and Map mode remains fully functional on non-AR devices.
+- Accuracy note: without a VPS/geospatial anchor (which would need an API key and breaks the
+  zero-setup requirement), absolute placement is bounded by phone GPS (±few m) and compass;
+  the projection is internally consistent with the on-screen arrow and degrades gracefully.
 
 ---
 

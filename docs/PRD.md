@@ -159,7 +159,11 @@ The application follows a simple, robust pipeline:
 ### 6.2 AR implementation notes
 - AR mode is delivered as a native Kotlin `PlatformView` hosting an ARCore `Session` with
   horizontal-plane detection and an OpenGL renderer (camera background + detected planes +
-  world-anchored marker + route ribbon + destination beacon).
+  world-anchored marker + route ribbon + 3D ground direction arrows + destination beacon +
+  camera-facing 3D text labels for remaining metres / steps and the destination name).
+- The route, arrows and labels are only drawn once a ground plane is detected and are locked
+  to that plane's height (a ground anchor placed at the road, lower-centre of the view), so the
+  path sits **on** the road rather than floating above it.
 - The walking route (from the routing service) and the live device pose (GPS + compass) are
   streamed to the native side. Each frame it projects the route's geographic points into the
   ARCore **world** frame using an East-North-Up projection whose rotation is derived from the

@@ -61,6 +61,20 @@ class ArViewController {
     });
   }
 
+  /// Streams the textual guidance drawn as 3D labels in the scene: the distance
+  /// and step count remaining, and the destination name shown on the beacon.
+  Future<void> updateGuidance({
+    required String distanceText,
+    required String stepsText,
+    required String destName,
+  }) {
+    return _invoke('updateGuidance', {
+      'distanceText': distanceText,
+      'stepsText': stepsText,
+      'destName': destName,
+    });
+  }
+
   Future<void> clearRoute() => _invoke('clearRoute', null);
 
   Future<void> _invoke(String method, Object? args) async {

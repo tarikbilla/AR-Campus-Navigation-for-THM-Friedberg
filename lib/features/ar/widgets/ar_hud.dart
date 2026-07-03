@@ -18,6 +18,7 @@ class ArHud extends StatelessWidget {
     required this.building,
     required this.status,
     required this.route,
+    required this.remainingMeters,
     required this.distanceMeters,
     required this.relativeDegrees,
     required this.bearingDegrees,
@@ -29,6 +30,9 @@ class ArHud extends StatelessWidget {
   final CampusBuilding building;
   final ArStatus status;
   final WalkingRoute? route;
+
+  /// Walking distance still to go (route-aware); drives the big number + steps.
+  final double? remainingMeters;
   final double? distanceMeters;
   final double? relativeDegrees;
   final double? bearingDegrees;
@@ -36,10 +40,20 @@ class ArHud extends StatelessWidget {
   final VoidCallback onChangeTarget;
   final VoidCallback onBack;
 
-  /// Prefers the walking-route distance; falls back to straight-line distance.
+  double? get _shownMeters =>
+      remainingMeters ?? route?.distanceMeters ?? distanceMeters;
+
+  /// Remaining walking distance for the big number.
   String get _primaryDistance {
-    final double? meters = route?.distanceMeters ?? distanceMeters;
+    final double? meters = _shownMeters;
     return meters == null ? '—' : GeoUtils.formatDistance(meters);
+  }
+
+  /// Estimated remaining steps, e.g. "170 steps".
+  String? get _stepsText {
+    final double? meters = _shownMeters;
+    if (meters == null) return null;
+    return '${GeoUtils.stepsForMeters(meters)} steps';
   }
 
   @override
@@ -206,16 +220,20 @@ class ArHud extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (route != null)
+                          if (_stepsText != null)
                             Row(
                               children: [
                                 const Icon(Icons.directions_walk,
                                     color: Colors.white70, size: 14),
                                 const SizedBox(width: 4),
-                                Text('${route!.etaLabel} walk',
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w700)),
+                                Text(
+                                  route != null
+                                      ? '${_stepsText!} · ${route!.etaLabel}'
+                                      : _stepsText!,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700),
+                                ),
                               ],
                             ),
                           Text(

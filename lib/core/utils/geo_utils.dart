@@ -81,4 +81,65 @@ class GeoUtils {
     final int index = ((bearing % 360) / 22.5).round() % 16;
     return points[index];
   }
+
+  /// Average walking step length in metres, used to estimate a step count.
+  static const double stepLengthMeters = 0.75;
+
+  /// Estimated number of walking steps to cover [meters].
+  static int stepsForMeters(double meters) {
+    if (meters.isNaN || meters.isInfinite || meters <= 0) return 0;
+    return (meters / stepLengthMeters).round();
+  }
+
+  /// Remaining distance (metres) from [user] to the end of the [route],
+  /// measured *along* the polyline: the user is projected onto the nearest
+  /// segment and the remaining segment lengths are summed. Falls back to the
+  /// straight-line distance to the last point when the route is degenerate.
+  static double remainingAlongRoute(List<LatLng> route, LatLng user) {
+    if (route.length < 2) {
+      return route.isEmpty ? 0 : distanceMeters(user, route.last);
+    }
+
+    // Local equirectangular projection (metres) centred on the user.
+    final double mPerLat = 111320.0;
+    final double mPerLng = 111320.0 * math.cos(_toRadians(user.latitude));
+    List<double> toXY(LatLng p) => [
+          (p.longitude - user.longitude) * mPerLng,
+          (p.latitude - user.latitude) * mPerLat,
+        ];
+
+    double bestDist = double.infinity;
+    int bestSeg = 0;
+    double bestT = 0;
+
+    for (int i = 0; i < route.length - 1; i++) {
+      final a = toXY(route[i]);
+      final b = toXY(route[i + 1]);
+      final dx = b[0] - a[0];
+      final dy = b[1] - a[1];
+      final segLen2 = dx * dx + dy * dy;
+      double t = 0;
+      if (segLen2 > 0) {
+        // Project the user (origin) onto the segment.
+        t = (-a[0] * dx + -a[1] * dy) / segLen2;
+        t = t.clamp(0.0, 1.0);
+      }
+      final px = a[0] + dx * t;
+      final py = a[1] + dy * t;
+      final d = math.sqrt(px * px + py * py);
+      if (d < bestDist) {
+        bestDist = d;
+        bestSeg = i;
+        bestT = t;
+      }
+    }
+
+    // Remaining = partial of the current segment + all following segments.
+    double remaining =
+        distanceMeters(route[bestSeg], route[bestSeg + 1]) * (1 - bestT);
+    for (int i = bestSeg + 1; i < route.length - 1; i++) {
+      remaining += distanceMeters(route[i], route[i + 1]);
+    }
+    return remaining;
+  }
 }

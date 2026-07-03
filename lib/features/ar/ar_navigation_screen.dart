@@ -54,6 +54,19 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
   LatLng? _routeOrigin;
   String? _routeTargetId;
   bool _arrivedNotified = false;
+  String? _lastGuidanceKey;
+
+  /// Remaining walking distance to the target (metres), route-aware.
+  double? get _remainingMeters {
+    final t = _target;
+    final p = _position;
+    if (t == null || p == null) return null;
+    final route = _route;
+    if (route != null && route.points.length >= 2) {
+      return GeoUtils.remainingAlongRoute(route.points, p.location);
+    }
+    return GeoUtils.distanceMeters(p.location, t.location);
+  }
 
   @override
   void initState() {
@@ -115,6 +128,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
         });
         _maybeSendPose();
         _maybeFetchRoute();
+        _maybeSendGuidance();
       }
       _positionSub = _location.stream().listen((p) {
         if (!mounted) return;
@@ -124,6 +138,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
         });
         _maybeSendPose();
         _maybeFetchRoute();
+        _maybeSendGuidance();
         _checkArrival();
       });
     }
@@ -144,7 +159,9 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
     if (route != null && target != null) {
       controller.setRoute(route.points, target.location);
     }
+    _lastGuidanceKey = null;
     _maybeSendPose();
+    _maybeSendGuidance();
   }
 
   void _maybeSendPose() {
@@ -156,6 +173,28 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
       lng: p.location.longitude,
       heading: h,
       accuracy: p.accuracyMeters,
+    );
+  }
+
+  /// Sends the distance / steps / destination labels to the native 3D scene,
+  /// but only when the displayed values actually change.
+  void _maybeSendGuidance() {
+    final controller = _arController;
+    final target = _target;
+    final meters = _remainingMeters;
+    if (controller == null || target == null || meters == null) return;
+
+    final int steps = GeoUtils.stepsForMeters(meters);
+    final String distanceText = GeoUtils.formatDistance(meters);
+    final String stepsText = '$steps steps';
+    final String key = '$distanceText|$stepsText|${target.id}';
+    if (key == _lastGuidanceKey) return;
+    _lastGuidanceKey = key;
+
+    controller.updateGuidance(
+      distanceText: distanceText,
+      stepsText: stepsText,
+      destName: target.name,
     );
   }
 
@@ -179,6 +218,8 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
       _routeTargetId = target.id;
     });
     _arController?.setRoute(route.points, target.location);
+    _lastGuidanceKey = null; // route changed → refresh the 3D labels
+    _maybeSendGuidance();
   }
 
   void _checkArrival() {
@@ -303,6 +344,7 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
             building: target,
             status: _arStatus,
             route: _route,
+            remainingMeters: _remainingMeters,
             distanceMeters: distance,
             relativeDegrees: relative,
             bearingDegrees: bearing,

@@ -24,12 +24,16 @@ import io.flutter.plugin.platform.PlatformView
 import net.godevs.thmcampusnav.ar.helpers.DisplayRotationHelper
 import net.godevs.thmcampusnav.ar.rendering.BackgroundRenderer
 import net.godevs.thmcampusnav.ar.rendering.BeaconRenderer
+import net.godevs.thmcampusnav.ar.rendering.BillboardTextRenderer
+import net.godevs.thmcampusnav.ar.rendering.GroundArrowRenderer
 import net.godevs.thmcampusnav.ar.rendering.MarkerRenderer
 import net.godevs.thmcampusnav.ar.rendering.PlaneRenderer
 import net.godevs.thmcampusnav.ar.rendering.RouteRenderer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -58,6 +62,9 @@ class ArView(
     private val markerRenderer = MarkerRenderer()
     private val routeRenderer = RouteRenderer()
     private val beaconRenderer = BeaconRenderer()
+    private val groundArrowRenderer = GroundArrowRenderer()
+    private val infoLabel = BillboardTextRenderer()
+    private val destLabel = BillboardTextRenderer()
 
     private var session: Session? = null
     private var glInitialised = false
@@ -77,6 +84,11 @@ class ArView(
     @Volatile private var routeGeo: DoubleArray? = null // flat [lat,lng,...]
     @Volatile private var destGeo: DoubleArray? = null  // [lat,lng]
     @Volatile private var pose: DoubleArray? = null      // [lat,lng,headingDeg]
+
+    // Guidance text drawn as 3D labels (written on main; read on the GL thread).
+    @Volatile private var distanceText: String? = null
+    @Volatile private var stepsText: String? = null
+    @Volatile private var destName: String? = null
 
     private var lastTrackingState = ""
     private var lastPlaneCount = -1
@@ -130,6 +142,14 @@ class ArView(
                     (args["lng"] as Number).toDouble(),
                     (args["heading"] as Number).toDouble(),
                 )
+                result.success(null)
+            }
+            "updateGuidance" -> {
+                @Suppress("UNCHECKED_CAST")
+                val args = call.arguments as Map<String, Any?>
+                distanceText = args["distanceText"] as String?
+                stepsText = args["stepsText"] as String?
+                destName = args["destName"] as String?
                 result.success(null)
             }
             "clearRoute" -> {
@@ -193,6 +213,9 @@ class ArView(
             markerRenderer.createOnGlThread()
             routeRenderer.createOnGlThread()
             beaconRenderer.createOnGlThread()
+            groundArrowRenderer.createOnGlThread()
+            infoLabel.createOnGlThread()
+            destLabel.createOnGlThread()
             glInitialised = true
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to initialise GL renderers", t)
@@ -229,16 +252,21 @@ class ArView(
                 val planes = session.getAllTrackables(Plane::class.java)
                 planeRenderer.draw(planes, viewMatrix, projMatrix)
 
-                if (anchor == null) tryPlaceAnchor(frame)
-                val groundY = resolveGroundY(camera, planes)
-                anchor?.let { a ->
-                    if (a.trackingState == TrackingState.TRACKING) {
-                        a.pose.toMatrix(anchorMatrix, 0)
-                        markerRenderer.draw(anchorMatrix, viewMatrix, projMatrix)
-                    }
-                }
+                maybePlaceAnchor(frame)
 
-                renderRoute(camera, groundY)
+                // Only draw the route/arrows/labels once a real ground plane is
+                // available, and lock them to that plane's height — so the path
+                // sits ON the road instead of floating on an estimated height.
+                val groundY = resolveGroundY(planes)
+                if (groundY != null) {
+                    anchor?.let { a ->
+                        if (a.trackingState == TrackingState.TRACKING) {
+                            a.pose.toMatrix(anchorMatrix, 0)
+                            markerRenderer.draw(anchorMatrix, viewMatrix, projMatrix)
+                        }
+                    }
+                    renderRoute(camera, groundY)
+                }
 
                 phase += 0.015f
                 if (phase > 1_000_000f) phase = 0f
@@ -318,35 +346,134 @@ class ArView(
         }
         routeRenderer.draw(world, count, viewProjMatrix, phase)
 
+        // Flowing 3D direction arrows on the ground along the first stretch.
+        drawGroundArrows(world, count, groundY)
+
+        // Camera basis for billboard labels (always face the viewer).
+        val camRight = camPose.xAxis
+        val camUp = camPose.yAxis
+
+        // "distance / steps" label floating above the path a few metres ahead.
+        val dText = distanceText
+        val sText = stepsText
+        if (dText != null && sText != null) {
+            val ahead = pointAlong(world, count, 5.0f)
+            infoLabel.setText("$dText\n$sText")
+            infoLabel.draw(
+                ahead[0], groundY + 1.4f, ahead[1],
+                camRight, camUp, viewProjMatrix, 0.9f,
+            )
+        }
+
         destGeo?.let { d ->
             val north = (d[0] - userLat) * mPerDegLat
             val east = (d[1] - userLng) * mPerDegLng
             val bx = (camX + east * eastX + north * northX).toFloat()
             val bz = (camZ + east * eastZ + north * northZ).toFloat()
             beaconRenderer.draw(bx, groundY, bz, viewProjMatrix, phase)
+
+            destName?.let { name ->
+                destLabel.setText(name)
+                destLabel.draw(
+                    bx, groundY + 5.4f, bz,
+                    camRight, camUp, viewProjMatrix, 1.0f,
+                )
+            }
         }
     }
 
-    private fun resolveGroundY(camera: Camera, planes: Collection<Plane>): Float {
+    /** Emits arrows every few metres along the world path for the first ~20 m. */
+    private fun drawGroundArrows(world: FloatArray, count: Int, groundY: Float) {
+        if (count < 2) return
+        val spacing = 3.2f
+        val maxDist = 20f
+        val arrowY = groundY + 0.03f
+
+        var acc = 0f
+        var nextEmit = spacing
+        var i = 0
+        while (i < count - 1 && acc < maxDist) {
+            val ax = world[i * 3]
+            val az = world[i * 3 + 2]
+            val bx = world[(i + 1) * 3]
+            val bz = world[(i + 1) * 3 + 2]
+            val segDx = bx - ax
+            val segDz = bz - az
+            val segLen = sqrt(segDx * segDx + segDz * segDz)
+            if (segLen < 1e-4f) {
+                i++
+                continue
+            }
+            val headingDeg = Math.toDegrees(atan2(segDx, segDz).toDouble()).toFloat()
+            while (nextEmit <= acc + segLen && nextEmit < maxDist) {
+                val t = (nextEmit - acc) / segLen
+                val px = ax + segDx * t
+                val pz = az + segDz * t
+                // Highlight band that flows forward over time.
+                var cp = (nextEmit * 0.16f - phase * 0.6f) % 1f
+                if (cp < 0f) cp += 1f
+                val glow = (1f - min(cp, 1f - cp) * 4f).coerceIn(0f, 1f)
+                groundArrowRenderer.draw(
+                    px, arrowY, pz, headingDeg, viewProjMatrix,
+                    0.10f, 0.55f + 0.20f * glow, 0.45f + 0.55f * glow,
+                    0.40f + 0.55f * glow,
+                )
+                nextEmit += spacing
+            }
+            acc += segLen
+            i++
+        }
+    }
+
+    /** World XZ of the point [dist] metres along the path from its start. */
+    private fun pointAlong(world: FloatArray, count: Int, dist: Float): FloatArray {
+        if (count < 2) return floatArrayOf(world[0], world[2])
+        var acc = 0f
+        for (i in 0 until count - 1) {
+            val ax = world[i * 3]
+            val az = world[i * 3 + 2]
+            val bx = world[(i + 1) * 3]
+            val bz = world[(i + 1) * 3 + 2]
+            val dx = bx - ax
+            val dz = bz - az
+            val segLen = sqrt(dx * dx + dz * dz)
+            if (acc + segLen >= dist) {
+                val t = if (segLen < 1e-4f) 0f else (dist - acc) / segLen
+                return floatArrayOf(ax + dx * t, az + dz * t)
+            }
+            acc += segLen
+        }
+        return floatArrayOf(world[(count - 1) * 3], world[(count - 1) * 3 + 2])
+    }
+
+    private fun resolveGroundY(planes: Collection<Plane>): Float? {
         anchor?.let { if (it.trackingState == TrackingState.TRACKING) return it.pose.ty() }
         for (plane in planes) {
             if (plane.trackingState == TrackingState.TRACKING && plane.subsumedBy == null) {
                 return plane.centerPose.ty()
             }
         }
-        return camera.pose.ty() - 1.4f
+        return null
     }
 
-    private fun tryPlaceAnchor(frame: Frame) {
+    /**
+     * Anchors to the ground where the road is (lower-centre of the view). Placed
+     * once and re-placed if the anchor stops tracking, giving a stable ground
+     * reference so the path stays locked to the road.
+     */
+    private fun maybePlaceAnchor(frame: Frame) {
+        val existing = anchor
+        if (existing != null && existing.trackingState == TrackingState.TRACKING) return
         if (viewportWidth == 0 || viewportHeight == 0) return
         val cx = viewportWidth / 2f
-        val cy = viewportHeight / 2f
+        val cy = viewportHeight * 0.68f
         for (hit in frame.hitTest(cx, cy)) {
             val trackable = hit.trackable
             if (trackable is Plane &&
                 trackable.trackingState == TrackingState.TRACKING &&
                 trackable.isPoseInPolygon(hit.hitPose)
             ) {
+                existing?.detach()
                 anchor = hit.createAnchor()
                 return
             }

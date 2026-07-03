@@ -1,0 +1,207 @@
+package net.godevs.thmcampusnav.ar.rendering
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.opengl.GLES20
+import android.opengl.GLUtils
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
+import kotlin.math.max
+
+/**
+ * Renders a line (or lines) of text as a camera-facing billboard quad in the AR
+ * scene ("3D text"). The text is rasterised to a bitmap (with a rounded pill
+ * background) and uploaded as a texture; the quad is oriented each frame using
+ * the camera's right/up vectors so it always faces the viewer and scales with
+ * distance like any other 3D object.
+ *
+ * Each instance owns one texture / one string.
+ */
+class BillboardTextRenderer {
+
+    private var program = 0
+    private var positionAttrib = 0
+    private var texCoordAttrib = 0
+    private var mvpUniform = 0
+    private var texUniform = 0
+
+    private var textureId = -1
+    private var texWidth = 1
+    private var texHeight = 1
+    private var currentText: String? = null
+
+    private lateinit var posBuffer: FloatBuffer
+    private lateinit var uvBuffer: FloatBuffer
+
+    fun createOnGlThread() {
+        program = ShaderUtil.createProgram(VERTEX_SHADER, FRAGMENT_SHADER)
+        positionAttrib = GLES20.glGetAttribLocation(program, "a_Position")
+        texCoordAttrib = GLES20.glGetAttribLocation(program, "a_TexCoord")
+        mvpUniform = GLES20.glGetUniformLocation(program, "u_ModelViewProjection")
+        texUniform = GLES20.glGetUniformLocation(program, "u_Texture")
+
+        val textures = IntArray(1)
+        GLES20.glGenTextures(1, textures, 0)
+        textureId = textures[0]
+
+        posBuffer = ByteBuffer
+            .allocateDirect(4 * 3 * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+
+        // UVs for TL, TR, BL, BR (triangle strip); bitmap top row is t=0.
+        uvBuffer = ByteBuffer
+            .allocateDirect(4 * 2 * 4)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+        uvBuffer.put(floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f))
+        uvBuffer.rewind()
+    }
+
+    /** Rasterises [text] (supports "\n") to the texture. No-op if unchanged. */
+    fun setText(text: String) {
+        if (text == currentText) return
+        currentText = text
+        val bmp = rasterize(text)
+        texWidth = bmp.width
+        texHeight = bmp.height
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLES20.glTexParameteri(
+            GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(
+            GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(
+            GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(
+            GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
+        bmp.recycle()
+    }
+
+    /**
+     * Draws the label centred at world (cx,cy,cz), oriented to face the camera
+     * using its [right] and [up] world axes, at [heightMeters] tall.
+     */
+    fun draw(
+        cx: Float,
+        cy: Float,
+        cz: Float,
+        right: FloatArray,
+        up: FloatArray,
+        viewProj: FloatArray,
+        heightMeters: Float,
+    ) {
+        if (currentText == null) return
+        val aspect = texWidth.toFloat() / texHeight.toFloat()
+        val h = heightMeters
+        val w = h * aspect
+        val hw = w * 0.5f
+        val hh = h * 0.5f
+
+        // Corner = centre ± hw*right ± hh*up, ordered TL, TR, BL, BR.
+        posBuffer.rewind()
+        putCorner(cx, cy, cz, right, up, -hw, hh)
+        putCorner(cx, cy, cz, right, up, hw, hh)
+        putCorner(cx, cy, cz, right, up, -hw, -hh)
+        putCorner(cx, cy, cz, right, up, hw, -hh)
+        posBuffer.rewind()
+
+        GLES20.glUseProgram(program)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        // Android bitmaps are premultiplied.
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDepthMask(false)
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLES20.glUniform1i(texUniform, 0)
+        GLES20.glUniformMatrix4fv(mvpUniform, 1, false, viewProj, 0)
+
+        GLES20.glEnableVertexAttribArray(positionAttrib)
+        GLES20.glVertexAttribPointer(positionAttrib, 3, GLES20.GL_FLOAT, false, 0, posBuffer)
+        uvBuffer.rewind()
+        GLES20.glEnableVertexAttribArray(texCoordAttrib)
+        GLES20.glVertexAttribPointer(texCoordAttrib, 2, GLES20.GL_FLOAT, false, 0, uvBuffer)
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+        GLES20.glDisableVertexAttribArray(positionAttrib)
+        GLES20.glDisableVertexAttribArray(texCoordAttrib)
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun putCorner(
+        cx: Float, cy: Float, cz: Float,
+        right: FloatArray, up: FloatArray, s: Float, t: Float,
+    ) {
+        posBuffer.put(cx + right[0] * s + up[0] * t)
+        posBuffer.put(cy + right[1] * s + up[1] * t)
+        posBuffer.put(cz + right[2] * s + up[2] * t)
+    }
+
+    private fun rasterize(text: String): Bitmap {
+        val lines = text.split("\n")
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 56f
+            color = -0x1 // white
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val fm = paint.fontMetrics
+        val lineH = fm.descent - fm.ascent
+        val padX = 40f
+        val padY = 28f
+        var maxW = 0f
+        for (l in lines) maxW = max(maxW, paint.measureText(l))
+        val w = (maxW + padX * 2).toInt().coerceAtLeast(1)
+        val h = (lineH * lines.size + padY * 2).toInt().coerceAtLeast(1)
+
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val radius = h * 0.30f
+        val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xCC0E1512.toInt() // dark, translucent
+        }
+        canvas.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), radius, radius, bg)
+        val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 4f
+            color = 0x66FFFFFF.toInt()
+        }
+        canvas.drawRoundRect(
+            RectF(2f, 2f, w - 2f, h - 2f), radius, radius, border)
+
+        var y = padY - fm.ascent
+        for (l in lines) {
+            canvas.drawText(l, padX, y, paint)
+            y += lineH
+        }
+        return bmp
+    }
+
+    companion object {
+        private const val VERTEX_SHADER = """
+            uniform mat4 u_ModelViewProjection;
+            attribute vec4 a_Position;
+            attribute vec2 a_TexCoord;
+            varying vec2 v_TexCoord;
+            void main() {
+                v_TexCoord = a_TexCoord;
+                gl_Position = u_ModelViewProjection * a_Position;
+            }
+        """
+
+        private const val FRAGMENT_SHADER = """
+            precision mediump float;
+            uniform sampler2D u_Texture;
+            varying vec2 v_TexCoord;
+            void main() {
+                gl_FragColor = texture2D(u_Texture, v_TexCoord);
+            }
+        """
+    }
+}

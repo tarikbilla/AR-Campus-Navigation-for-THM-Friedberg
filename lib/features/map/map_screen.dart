@@ -16,6 +16,8 @@ import '../../services/permission_service.dart';
 import '../../services/routing_service.dart';
 import '../../widgets/building_list_sheet.dart';
 import '../ar/ar_navigation_screen.dart';
+import 'map_styles.dart';
+import 'widgets/map_layer_switcher.dart';
 import 'widgets/map_markers.dart';
 import 'widgets/route_overlay.dart';
 import 'widgets/walking_buddy_layer.dart';
@@ -46,6 +48,9 @@ class _MapScreenState extends State<MapScreen>
   WalkingRoute? _route;
   bool _routeLoading = false;
   bool _locationDenied = false;
+  int _styleIndex = 0;
+
+  MapStyle get _style => MapStyles.all[_styleIndex];
 
   AnimationController? _moveCtrl;
 
@@ -254,6 +259,15 @@ class _MapScreenState extends State<MapScreen>
           _buildMap(),
           if (_locationDenied) _buildLocationBanner(),
           Positioned(
+            top: _locationDenied ? 84 : 12,
+            right: 12,
+            child: MapLayerSwitcher(
+              styles: MapStyles.all,
+              currentIndex: _styleIndex,
+              onSelected: (i) => setState(() => _styleIndex = i),
+            ),
+          ),
+          Positioned(
             left: 0,
             right: 0,
             bottom: 0,
@@ -302,7 +316,9 @@ class _MapScreenState extends State<MapScreen>
       ),
       children: [
         TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          key: ValueKey(_style.id),
+          urlTemplate: _style.urlTemplate,
+          subdomains: _style.subdomains,
           userAgentPackageName: 'net.godevs.thmcampusnav',
           maxZoom: 19,
         ),
@@ -343,9 +359,9 @@ class _MapScreenState extends State<MapScreen>
               ),
           ],
         ),
-        const RichAttributionWidget(
+        RichAttributionWidget(
           attributions: [
-            TextSourceAttribution(AppInfo.osmAttribution),
+            for (final a in _style.attributions) TextSourceAttribution(a),
           ],
         ),
       ],

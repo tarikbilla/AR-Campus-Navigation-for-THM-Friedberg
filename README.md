@@ -19,17 +19,22 @@ the app and start navigating.
 ## Features
 
 - 🗺️ **Map Mode** — interactive OpenStreetMap of the campus with your live position and
-  tappable building markers. Selecting a building draws a **road-following walking route**
-  (casing + gradient line, direction chevrons and an animated "comet") with live distance/ETA.
-- 📸 **AR Mode** — a real ARCore session with horizontal-plane detection. Once the ground is
-  detected, the walking route is drawn **locked to the road surface** (not floating) as a flowing
-  ribbon with **3D direction arrows** running along it, a glowing **beacon** at the destination,
-  and **3D floating text** showing the remaining **metres and step count** plus the destination
-  name. Everything is geo-aligned, so it stays locked to the world as you look around 360°.
+  tappable building markers. The **entire campus walking-lane network** is shown as faint dashed
+  paths, and selecting a building draws a **lane-following walking route** (casing + gradient line,
+  direction chevrons and a small **animated walking character** that travels the route) with live
+  distance/ETA.
+- 📸 **AR Mode** — a real ARCore session with horizontal-plane detection. The walking route is
+  **painted flat on the road surface** (not floating) as a flowing ribbon with **3D direction
+  arrows** running along it, and the remaining **metres · step count** and the destination name
+  are **painted flat on the ground** like street markings — placed from your GPS position, compass
+  heading and the live camera pose. A single tall glowing **beacon** marks the destination so you
+  can spot the target building from across campus. Everything is geo-aligned and stays locked to
+  the world as you look around 360°.
 - 🧭 Sensor fusion — GPS (position), compass (heading) and camera (ARCore) combined to compute
   the bearing/distance and to project the route into the AR world frame.
-- 🧭 Routing — real pedestrian routes via the keyless OSRM foot service (the routing backend
-  used by openstreetmap.org), with a straight-line fallback when offline.
+- 🧭 Routing — an **on-device campus footpath graph** (Dijkstra) keeps walking directions on the
+  real internal campus lanes even where OpenStreetMap does not map them, works fully offline, and
+  falls back to the keyless OSRM foot service off-campus (straight line if neither is available).
 - 🚪 **Zero friction** — no registration, no ads, no tracking; works offline for guidance
   (map tiles need connectivity).
 - 🎨 Professional Material 3 UI with light/dark themes and a THM-green identity.
@@ -44,7 +49,7 @@ implemented here. Indoor room-level navigation is documented as a future outlook
 | App framework | Flutter (Android target) |
 | Map | `flutter_map` + OpenStreetMap tiles (no API key) |
 | AR | Native **ARCore** (`com.google.ar:core`) via a Flutter hybrid-composition `PlatformView` |
-| Routing | Keyless OSRM foot service (`routing.openstreetmap.de`) via `http` |
+| Routing | On-device campus footpath graph (Dijkstra); keyless OSRM foot service off-campus |
 | Location | `geolocator` |
 | Orientation | `flutter_compass` |
 | Permissions | `permission_handler` |
@@ -116,3 +121,26 @@ Building codes (A1–A8, B1–B2, C1, Mensa) and coordinates in
 campus (Wilhelm-Leuschner-Straße 13, 61169 Friedberg). They are centralised in one file, so
 positions or descriptions can be refined (e.g. against the official campus plan) without
 touching any UI or logic code.
+
+### Campus walking-path network
+
+The internal pedestrian lanes used for routing live in `lib/data/campus_paths.dart` as
+`footways` — the **real OpenStreetMap footpath geometry** for the campus (the same dashed paths
+you see on the map tiles), clipped to the campus area. The routing graph (nodes, junctions and
+adjacency) is built from this geometry at runtime by de-duplicating shared coordinates, and
+routing is restricted to the largest connected component so it never dead-ends on an isolated
+fragment. The map draws exactly these polylines, so the shown lanes and the routed path always
+sit on the real footpaths.
+
+To refresh after OSM edits, re-run the Overpass import for the campus bounding box:
+
+```bash
+curl -H 'User-Agent: THMCampusNav/1.0' -G 'https://overpass-api.de/api/interpreter' \
+  --data-urlencode 'data=[out:json][timeout:40];
+  (way["highway"~"^(footway|path|pedestrian|steps|cycleway|living_street|service)$"](50.3272,8.7548,50.3322,8.7612););
+  out geom;'
+```
+
+then regenerate the `footways` literal (round to 6 dp, clip to the campus box, drop tiny stubs).
+Routing over this graph (Dijkstra + origin/destination snapping) is verified by
+`test/campus_router_test.dart`, which also asserts every route vertex lies on a real footpath.

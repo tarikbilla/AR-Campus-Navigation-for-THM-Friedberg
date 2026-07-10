@@ -254,19 +254,18 @@ class ArView(
 
                 maybePlaceAnchor(frame)
 
-                // Only draw the route/arrows/labels once a real ground plane is
-                // available, and lock them to that plane's height — so the path
-                // sits ON the road instead of floating on an estimated height.
-                val groundY = resolveGroundY(planes)
-                if (groundY != null) {
-                    anchor?.let { a ->
-                        if (a.trackingState == TrackingState.TRACKING) {
-                            a.pose.toMatrix(anchorMatrix, 0)
-                            markerRenderer.draw(anchorMatrix, viewMatrix, projMatrix)
-                        }
+                // Resolve the true ground height under the camera and lock the
+                // path/arrows/text to it, so everything sits ON the road instead
+                // of floating. Falls back to an eye-height estimate before a
+                // plane is found, so guidance appears immediately at foot level.
+                val groundY = resolveGroundY(planes, camera.pose.ty())
+                anchor?.let { a ->
+                    if (a.trackingState == TrackingState.TRACKING) {
+                        a.pose.toMatrix(anchorMatrix, 0)
+                        markerRenderer.draw(anchorMatrix, viewMatrix, projMatrix)
                     }
-                    renderRoute(camera, groundY)
                 }
+                renderRoute(camera, groundY)
 
                 phase += 0.015f
                 if (phase > 1_000_000f) phase = 0f
@@ -341,27 +340,31 @@ class ArView(
             val north = (lat - userLat) * mPerDegLat
             val east = (lng - userLng) * mPerDegLng
             world[i * 3] = (camX + east * eastX + north * northX).toFloat()
-            world[i * 3 + 1] = groundY
+            world[i * 3 + 1] = groundY + 0.02f // hug the ground, avoid z-fighting
             world[i * 3 + 2] = (camZ + east * eastZ + north * northZ).toFloat()
         }
         routeRenderer.draw(world, count, viewProjMatrix, phase)
 
-        // Flowing 3D direction arrows on the ground along the first stretch.
+        // Flowing 3D direction arrows painted flat on the ground along the path.
         drawGroundArrows(world, count, groundY)
 
-        // Camera basis for billboard labels (always face the viewer).
-        val camRight = camPose.xAxis
-        val camUp = camPose.yAxis
-
-        // "distance / steps" label floating above the path a few metres ahead.
+        // "distance • steps" painted flat on the road a few metres ahead,
+        // reading in the walking direction (like painted text on a street).
         val dText = distanceText
         val sText = stepsText
         if (dText != null && sText != null) {
-            val ahead = pointAlong(world, count, 5.0f)
-            infoLabel.setText("$dText\n$sText")
-            infoLabel.draw(
-                ahead[0], groundY + 1.4f, ahead[1],
-                camRight, camUp, viewProjMatrix, 0.9f,
+            val near = pointAlong(world, count, 5.5f)
+            val far = pointAlong(world, count, 8.0f)
+            var dx = far[0] - near[0]
+            var dz = far[1] - near[1]
+            if (dx * dx + dz * dz < 1e-4f) {
+                dx = world[(count - 1) * 3] - world[0]
+                dz = world[(count - 1) * 3 + 2] - world[2]
+            }
+            infoLabel.setText("$dText   •   $sText")
+            infoLabel.drawOnGround(
+                near[0], groundY + 0.04f, near[1],
+                dx, dz, viewProjMatrix, 1.1f,
             )
         }
 
@@ -370,23 +373,29 @@ class ArView(
             val east = (d[1] - userLng) * mPerDegLng
             val bx = (camX + east * eastX + north * northX).toFloat()
             val bz = (camZ + east * eastZ + north * northZ).toFloat()
+            // Tall glowing beacon so the target building is visible from afar.
             beaconRenderer.draw(bx, groundY, bz, viewProjMatrix, phase)
 
             destName?.let { name ->
+                // Destination name painted flat on the ground at the beacon base.
+                var lx = (bx - camX).toFloat()
+                var lz = (bz - camZ).toFloat()
+                val dl = sqrt(lx * lx + lz * lz)
+                if (dl > 1e-3f) { lx /= dl; lz /= dl } else { lx = 0f; lz = 1f }
                 destLabel.setText(name)
-                destLabel.draw(
-                    bx, groundY + 5.4f, bz,
-                    camRight, camUp, viewProjMatrix, 1.0f,
+                destLabel.drawOnGround(
+                    bx - lx * 1.8f, groundY + 0.05f, bz - lz * 1.8f,
+                    lx, lz, viewProjMatrix, 1.4f,
                 )
             }
         }
     }
 
-    /** Emits arrows every few metres along the world path for the first ~20 m. */
+    /** Emits arrows every few metres along the world path (out to ~70 m). */
     private fun drawGroundArrows(world: FloatArray, count: Int, groundY: Float) {
         if (count < 2) return
         val spacing = 3.2f
-        val maxDist = 20f
+        val maxDist = 70f
         val arrowY = groundY + 0.03f
 
         var acc = 0f
@@ -446,14 +455,41 @@ class ArView(
         return floatArrayOf(world[(count - 1) * 3], world[(count - 1) * 3 + 2])
     }
 
-    private fun resolveGroundY(planes: Collection<Plane>): Float? {
-        anchor?.let { if (it.trackingState == TrackingState.TRACKING) return it.pose.ty() }
-        for (plane in planes) {
-            if (plane.trackingState == TrackingState.TRACKING && plane.subsumedBy == null) {
-                return plane.centerPose.ty()
+    /**
+     * True ground height under the camera. Prefers the anchor / a tracked
+     * upward-facing horizontal plane, but only accepts heights within a band
+     * around the expected ground ([cameraY] − eye height) — so ARCore locking
+     * onto a wall, table, or planter can't lift the whole route into the air.
+     * Falls back to the eye-height estimate so guidance still appears at foot
+     * level before a plane is found.
+     */
+    private fun resolveGroundY(planes: Collection<Plane>, cameraY: Float): Float {
+        val expected = cameraY - EYE_HEIGHT
+        val band = 0.7f
+
+        anchor?.let { a ->
+            if (a.trackingState == TrackingState.TRACKING) {
+                val ay = a.pose.ty()
+                if (kotlin.math.abs(ay - expected) <= band) return ay
             }
         }
-        return null
+
+        var best: Float? = null
+        var bestDelta = Float.MAX_VALUE
+        for (plane in planes) {
+            if (plane.trackingState == TrackingState.TRACKING &&
+                plane.subsumedBy == null &&
+                plane.type == Plane.Type.HORIZONTAL_UPWARD_FACING
+            ) {
+                val py = plane.centerPose.ty()
+                val delta = kotlin.math.abs(py - expected)
+                if (delta <= band && delta < bestDelta) {
+                    best = py
+                    bestDelta = delta
+                }
+            }
+        }
+        return best ?: expected
     }
 
     /**
@@ -471,6 +507,7 @@ class ArView(
             val trackable = hit.trackable
             if (trackable is Plane &&
                 trackable.trackingState == TrackingState.TRACKING &&
+                trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
                 trackable.isPoseInPolygon(hit.hitPose)
             ) {
                 existing?.detach()
@@ -506,5 +543,8 @@ class ArView(
 
     companion object {
         private const val TAG = "ArView"
+
+        /** Assumed height of the phone camera above the ground while walking. */
+        private const val EYE_HEIGHT = 1.4f
     }
 }

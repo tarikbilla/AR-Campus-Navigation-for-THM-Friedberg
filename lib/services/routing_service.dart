@@ -5,10 +5,13 @@ import 'package:latlong2/latlong.dart';
 
 import '../core/utils/geo_utils.dart';
 import '../data/models/walking_route.dart';
+import 'campus_router.dart';
 
-/// Fetches walking routes along real footpaths using the keyless OSRM foot
-/// service (the same routing backend used by openstreetmap.org). Falls back to
-/// a straight line when routing is unavailable, so the app keeps working
+/// Produces walking routes for the app. Inside the THM Friedberg campus it
+/// routes over the on-device [CampusRouter] pedestrian graph, so directions
+/// follow the real internal lanes (which OpenStreetMap does not fully map).
+/// Outside campus it uses the keyless OSRM foot service, and falls back to a
+/// straight-line estimate when neither is available — so the app keeps working
 /// offline / without any API key.
 class RoutingService {
   RoutingService();
@@ -18,6 +21,14 @@ class RoutingService {
   static const Duration _timeout = Duration(seconds: 12);
   static const double _walkingSpeedMps = 1.35; // ~4.9 km/h
 
+  // Campus bounding box (building extents + ~250 m margin). When the origin is
+  // inside it, the local campus graph gives better path-following than OSRM.
+  static const double _minLat = 50.3255;
+  static const double _maxLat = 50.3340;
+  static const double _minLng = 8.7538;
+  static const double _maxLng = 8.7628;
+
+  final CampusRouter _campusRouter = const CampusRouter();
   final Map<String, WalkingRoute> _cache = {};
 
   /// Returns a walking route from [origin] to [destination]. Results are cached
@@ -27,6 +38,16 @@ class RoutingService {
     final cached = _cache[key];
     if (cached != null) return cached;
 
+    // 1) On-campus: follow the internal walking-lane network locally.
+    if (_isOnCampus(origin)) {
+      final campus = _campusRouter.route(origin, destination);
+      if (campus != null) {
+        _cache[key] = campus;
+        return campus;
+      }
+    }
+
+    // 2) Off-campus: fall back to the online OSRM foot service.
     try {
       final uri = Uri.parse(
         '$_base/${origin.longitude},${origin.latitude};'
@@ -84,6 +105,12 @@ class RoutingService {
       isFallback: true,
     );
   }
+
+  bool _isOnCampus(LatLng p) =>
+      p.latitude >= _minLat &&
+      p.latitude <= _maxLat &&
+      p.longitude >= _minLng &&
+      p.longitude <= _maxLng;
 
   String _cacheKey(LatLng o, LatLng d) {
     String r(double v) => v.toStringAsFixed(4); // ~11 m buckets

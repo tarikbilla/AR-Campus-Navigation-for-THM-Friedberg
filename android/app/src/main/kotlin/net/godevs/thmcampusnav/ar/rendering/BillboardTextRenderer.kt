@@ -144,6 +144,77 @@ class BillboardTextRenderer {
         posBuffer.put(cz + right[2] * s + up[2] * t)
     }
 
+    /**
+     * Draws the label lying **flat on the ground** (in the XZ plane at height
+     * [y]), reading along the path direction ([dirX],[dirZ]) — like painted
+     * text on a road. [alongMeters] is the label's length in the walking
+     * direction; the across-path width follows the text's aspect ratio.
+     */
+    fun drawOnGround(
+        cx: Float,
+        y: Float,
+        cz: Float,
+        dirX: Float,
+        dirZ: Float,
+        viewProj: FloatArray,
+        alongMeters: Float,
+    ) {
+        if (currentText == null) return
+        var fx = dirX
+        var fz = dirZ
+        val flen = kotlin.math.sqrt(fx * fx + fz * fz)
+        if (flen < 1e-4f) return
+        fx /= flen; fz /= flen
+        // Viewer's right when looking along the path = rotate forward -90° in XZ.
+        val rx = fz
+        val rz = -fx
+
+        val aspect = texWidth.toFloat() / texHeight.toFloat()
+        val halfLen = alongMeters * 0.5f            // forward extent
+        val halfWid = alongMeters * aspect * 0.5f   // across-path extent
+
+        // Ground quad corners in bitmap order TL, TR, BL, BR (top = far end).
+        posBuffer.rewind()
+        putGround(cx, y, cz, fx, fz, rx, rz, halfLen, -halfWid)  // TL far-left
+        putGround(cx, y, cz, fx, fz, rx, rz, halfLen, halfWid)   // TR far-right
+        putGround(cx, y, cz, fx, fz, rx, rz, -halfLen, -halfWid) // BL near-left
+        putGround(cx, y, cz, fx, fz, rx, rz, -halfLen, halfWid)  // BR near-right
+        posBuffer.rewind()
+
+        GLES20.glUseProgram(program)
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glDepthMask(false)
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+        GLES20.glUniform1i(texUniform, 0)
+        GLES20.glUniformMatrix4fv(mvpUniform, 1, false, viewProj, 0)
+
+        GLES20.glEnableVertexAttribArray(positionAttrib)
+        GLES20.glVertexAttribPointer(positionAttrib, 3, GLES20.GL_FLOAT, false, 0, posBuffer)
+        uvBuffer.rewind()
+        GLES20.glEnableVertexAttribArray(texCoordAttrib)
+        GLES20.glVertexAttribPointer(texCoordAttrib, 2, GLES20.GL_FLOAT, false, 0, uvBuffer)
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+        GLES20.glDisableVertexAttribArray(positionAttrib)
+        GLES20.glDisableVertexAttribArray(texCoordAttrib)
+        GLES20.glDepthMask(true)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun putGround(
+        cx: Float, y: Float, cz: Float,
+        fx: Float, fz: Float, rx: Float, rz: Float,
+        along: Float, across: Float,
+    ) {
+        posBuffer.put(cx + fx * along + rx * across)
+        posBuffer.put(y)
+        posBuffer.put(cz + fz * along + rz * across)
+    }
+
     private fun rasterize(text: String): Bitmap {
         val lines = text.split("\n")
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

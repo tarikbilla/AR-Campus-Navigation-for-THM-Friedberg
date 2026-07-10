@@ -6,7 +6,28 @@ import 'package:latlong2/latlong.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/geo_utils.dart';
+import '../../../data/campus_paths.dart';
 import '../../../data/models/walking_route.dart';
+
+/// A faint dashed layer that reveals the *entire* campus walking-lane network
+/// (the real OpenStreetMap footpaths), not just the routed path — so users can
+/// see every small path on campus. It draws exactly the [CampusPaths.footways]
+/// geometry, so it lines up with the dashed paths on the map tiles. Drawn
+/// beneath the active route.
+Widget buildCampusLanesLayer(ColorScheme scheme) {
+  return PolylineLayer(
+    polylines: [
+      for (final lane in CampusPaths.footways)
+        Polyline(
+          points: lane,
+          strokeWidth: 3,
+          color: scheme.primary.withValues(alpha: 0.30),
+          pattern: StrokePattern.dashed(segments: const [5, 7]),
+          strokeCap: StrokeCap.round,
+        ),
+    ],
+  );
+}
 
 /// Builds the flutter_map layers that visualise a walking [WalkingRoute]:
 /// a casing + gradient line, a flowing wave of direction chevrons, and

@@ -18,6 +18,7 @@ import '../../widgets/building_list_sheet.dart';
 import '../ar/ar_navigation_screen.dart';
 import 'widgets/map_markers.dart';
 import 'widgets/route_overlay.dart';
+import 'widgets/walking_buddy_layer.dart';
 
 /// Map mode: an interactive OpenStreetMap of the THM Friedberg campus showing
 /// the user's live position, every building as a tappable marker, and a
@@ -305,11 +306,16 @@ class _MapScreenState extends State<MapScreen>
           userAgentPackageName: 'net.godevs.thmcampusnav',
           maxZoom: 19,
         ),
+        // The whole campus walking-lane network, always visible so users can
+        // see every small path — not only the routed one.
+        buildCampusLanesLayer(Theme.of(context).colorScheme),
         if (_route != null)
           ...buildRouteLayers(
             route: _route!,
             scheme: Theme.of(context).colorScheme,
           ),
+        if (_route != null && _route!.points.length >= 2)
+          WalkingBuddyLayer(route: _route!.points),
         if (_userPosition != null)
           MarkerLayer(
             markers: [

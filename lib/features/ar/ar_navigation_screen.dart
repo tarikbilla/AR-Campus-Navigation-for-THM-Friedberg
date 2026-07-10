@@ -187,15 +187,28 @@ class _ArNavigationScreenState extends State<ArNavigationScreen> {
     final int steps = GeoUtils.stepsForMeters(meters);
     final String distanceText = GeoUtils.formatDistance(meters);
     final String stepsText = '$steps steps';
-    final String key = '$distanceText|$stepsText|${target.id}';
+    final String etaText = _formatEta(meters);
+    final String key = '$distanceText|$stepsText|$etaText|${target.id}';
     if (key == _lastGuidanceKey) return;
     _lastGuidanceKey = key;
 
     controller.updateGuidance(
       distanceText: distanceText,
       stepsText: stepsText,
+      etaText: etaText,
       destName: target.name,
     );
+  }
+
+  /// Remaining walking time from [meters] at an average ~4.9 km/h pace.
+  String _formatEta(double meters) {
+    if (meters.isNaN || meters.isInfinite) return '—';
+    final int minutes = (meters / 1.35 / 60).round();
+    if (minutes < 1) return '<1 min';
+    if (minutes < 60) return '$minutes min';
+    final int h = minutes ~/ 60;
+    final int m = minutes % 60;
+    return m == 0 ? '$h h' : '$h h $m min';
   }
 
   Future<void> _maybeFetchRoute() async {

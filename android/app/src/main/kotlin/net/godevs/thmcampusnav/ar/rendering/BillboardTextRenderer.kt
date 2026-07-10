@@ -3,6 +3,7 @@ package net.godevs.thmcampusnav.ar.rendering
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.opengl.GLES20
@@ -66,7 +67,21 @@ class BillboardTextRenderer {
     fun setText(text: String) {
         if (text == currentText) return
         currentText = text
-        val bmp = rasterize(text)
+        upload(rasterize(text))
+    }
+
+    /**
+     * Rasterises a professional info card — a small uppercase [title], a large
+     * [big] value and a [sub] line — to the texture. No-op if unchanged.
+     */
+    fun setCard(title: String, big: String, sub: String) {
+        val key = "CARD|$title|$big|$sub"
+        if (key == currentText) return
+        currentText = key
+        upload(rasterizeCard(title, big, sub))
+    }
+
+    private fun upload(bmp: Bitmap) {
         texWidth = bmp.width
         texHeight = bmp.height
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
@@ -251,6 +266,86 @@ class BillboardTextRenderer {
             canvas.drawText(l, padX, y, paint)
             y += lineH
         }
+        return bmp
+    }
+
+    /** Rasterises a professional info card (title / big value / subtitle). */
+    private fun rasterizeCard(title: String, big: String, sub: String): Bitmap {
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 34f
+            color = 0xFF7FE3AE.toInt() // brand light
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.10f
+        }
+        val bigPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 84f
+            color = -0x1 // white
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = 34f
+            color = 0xFFCFD8D3.toInt()
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+        }
+
+        val titleFm = titlePaint.fontMetrics
+        val bigFm = bigPaint.fontMetrics
+        val subFm = subPaint.fontMetrics
+        val titleH = titleFm.descent - titleFm.ascent
+        val bigH = bigFm.descent - bigFm.ascent
+        val subH = subFm.descent - subFm.ascent
+
+        val padX = 46f
+        val padTop = 34f
+        val padBottom = 34f
+        val gap1 = 8f
+        val gap2 = 12f
+
+        val contentW = max(
+            titlePaint.measureText(title),
+            max(bigPaint.measureText(big), subPaint.measureText(sub)),
+        )
+        val w = (contentW + padX * 2).toInt().coerceAtLeast(1)
+        val h = (padTop + titleH + gap1 + bigH + gap2 + subH + padBottom)
+            .toInt().coerceAtLeast(1)
+
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val radius = 34f
+        val cardPath = Path().apply {
+            addRoundRect(
+                RectF(0f, 0f, w.toFloat(), h.toFloat()), radius, radius,
+                Path.Direction.CW,
+            )
+        }
+        canvas.drawPath(cardPath, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xF00E1512.toInt()
+        })
+
+        // Brand accent strip along the top edge.
+        canvas.save()
+        canvas.clipPath(cardPath)
+        canvas.drawRect(0f, 0f, w.toFloat(), 8f, Paint().apply {
+            color = 0xFF009640.toInt()
+        })
+        canvas.restore()
+
+        canvas.drawRoundRect(
+            RectF(2f, 2f, w - 2f, h - 2f), radius, radius,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 3f
+                color = 0x33FFFFFF
+            },
+        )
+
+        var top = padTop + 6f
+        canvas.drawText(title.uppercase(), padX, top - titleFm.ascent, titlePaint)
+        top += titleH + gap1
+        canvas.drawText(big, padX, top - bigFm.ascent, bigPaint)
+        top += bigH + gap2
+        canvas.drawText(sub, padX, top - subFm.ascent, subPaint)
+
         return bmp
     }
 

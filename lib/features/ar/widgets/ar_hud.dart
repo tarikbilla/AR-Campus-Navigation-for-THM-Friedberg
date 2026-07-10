@@ -7,7 +7,6 @@ import '../../../core/utils/geo_utils.dart';
 import '../../../data/models/campus_building.dart';
 import '../../../data/models/walking_route.dart';
 import '../ar_view.dart';
-import 'direction_arrow.dart';
 
 /// Glanceable heads-up display drawn over the live ARCore camera view. Shows
 /// the directional arrow, distance and turn guidance toward the target
@@ -60,20 +59,26 @@ class ArHud extends StatelessWidget {
   Widget build(BuildContext context) {
     final double rel = relativeDegrees ?? 0;
     final double relRadians = rel * math.pi / 180.0;
-    final bool arrived =
-        distanceMeters != null && distanceMeters! <= 12;
+    final bool arrived = distanceMeters != null && distanceMeters! <= 12;
+    final bool showTurn = hasGuidance && !arrived;
 
     return SafeArea(
       child: Column(
         children: [
           _topBar(context),
           const Spacer(),
-          if (hasGuidance)
-            _centerGuidance(context, rel, relRadians, arrived)
-          else
+          // The camera centre stays clear for the in-world AR guidance (the 3D
+          // pin, chevrons and card). Only acquiring / arrived states use it.
+          if (arrived)
+            _ArrivedBadge(name: building.name)
+          else if (!hasGuidance)
             _acquiringGuidance(context),
           const Spacer(),
-          _bottomCard(context, rel, arrived),
+          // Turn guidance lives at the bottom-centre as a compact floating pill,
+          // so it never blocks the view of the path ahead.
+          if (showTurn) _TurnPill(rel: rel, relRadians: relRadians),
+          if (showTurn) const SizedBox(height: 10),
+          _infoCard(context),
         ],
       ),
     );
@@ -91,37 +96,6 @@ class ArHud extends StatelessWidget {
           _CircleButton(icon: Icons.tune, onTap: onChangeTarget),
         ],
       ),
-    );
-  }
-
-  Widget _centerGuidance(
-      BuildContext context, double rel, double relRadians, bool arrived) {
-    if (arrived) {
-      return _ArrivedBadge(name: building.name);
-    }
-    final Color arrowColor =
-        rel.abs() <= 20 ? AppColors.brandLight : AppColors.accent;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        DirectionArrow(angleRadians: relRadians, color: arrowColor),
-        const SizedBox(height: 18),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: AppColors.hudScrim,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Text(
-            GeoUtils.turnInstruction(rel),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -165,98 +139,114 @@ class ArHud extends StatelessWidget {
     );
   }
 
-  Widget _bottomCard(BuildContext context, double rel, bool arrived) {
+  Widget _infoCard(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
       decoration: BoxDecoration(
         color: Colors.black.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(building.category.icon,
-                        color: AppColors.brandLight, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        building.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: AppColors.brand.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(building.category.icon,
+                    color: AppColors.brandLight, size: 18),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  building.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              if (bearingDegrees != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.explore_outlined,
+                          color: Colors.white70, size: 14),
+                      const SizedBox(width: 5),
+                      Text(
+                        GeoUtils.compassLabel(bearingDegrees!),
                         style: const TextStyle(
                           color: Colors.white,
+                          fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          fontSize: 16,
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _primaryDistance,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 34,
-                        fontWeight: FontWeight.w900,
-                        height: 1,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_stepsText != null)
-                            Row(
-                              children: [
-                                const Icon(Icons.directions_walk,
-                                    color: Colors.white70, size: 14),
-                                const SizedBox(width: 4),
-                                Text(
-                                  route != null
-                                      ? '${_stepsText!} · ${route!.etaLabel}'
-                                      : _stepsText!,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700),
-                                ),
-                              ],
-                            ),
-                          Text(
-                            bearingDegrees == null
-                                ? 'to destination'
-                                : 'toward ${GeoUtils.compassLabel(bearingDegrees!)}',
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            ],
           ),
-          const SizedBox(width: 12),
-          if (hasGuidance && !arrived)
-            MiniCompass(
-              relativeAngleRadians: rel * math.pi / 180.0,
-              color: AppColors.brandLight,
-            ),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _primaryDistance,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 36,
+                  fontWeight: FontWeight.w900,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(width: 14),
+              if (_stepsText != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 5),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.directions_walk,
+                          color: Colors.white70, size: 15),
+                      const SizedBox(width: 5),
+                      Text(
+                        route != null
+                            ? '${_stepsText!} · ${route!.etaLabel}'
+                            : _stepsText!,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );
@@ -334,6 +324,80 @@ class _CircleButton extends StatelessWidget {
           padding: const EdgeInsets.all(10),
           child: Icon(icon, color: Colors.white, size: 22),
         ),
+      ),
+    );
+  }
+}
+
+/// A compact, floating turn indicator shown at the bottom-centre: a rotating
+/// arrow plus the turn instruction. Keeps the camera centre clear so the user
+/// can see the path and the in-world 3D guidance.
+class _TurnPill extends StatelessWidget {
+  const _TurnPill({required this.rel, required this.relRadians});
+
+  final double rel;
+  final double relRadians;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool onCourse = rel.abs() <= 15;
+    final Color color = onCourse ? AppColors.brandLight : AppColors.accent;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 18, 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(40),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.18),
+              border:
+                  Border.all(color: color.withValues(alpha: 0.65), width: 2),
+            ),
+            child: Center(
+              child: AnimatedRotation(
+                turns: relRadians / (2 * math.pi),
+                duration: const Duration(milliseconds: 150),
+                child: Icon(
+                  onCourse
+                      ? Icons.arrow_upward_rounded
+                      : Icons.navigation_rounded,
+                  color: color,
+                  size: 26,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 220),
+            child: Text(
+              GeoUtils.turnInstruction(rel),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

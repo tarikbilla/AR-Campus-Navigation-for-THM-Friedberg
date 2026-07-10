@@ -27,6 +27,7 @@ import net.godevs.thmcampusnav.ar.rendering.BeaconRenderer
 import net.godevs.thmcampusnav.ar.rendering.BillboardTextRenderer
 import net.godevs.thmcampusnav.ar.rendering.GroundArrowRenderer
 import net.godevs.thmcampusnav.ar.rendering.MarkerRenderer
+import net.godevs.thmcampusnav.ar.rendering.PinRenderer
 import net.godevs.thmcampusnav.ar.rendering.PlaneRenderer
 import net.godevs.thmcampusnav.ar.rendering.RouteRenderer
 import javax.microedition.khronos.egl.EGLConfig
@@ -63,6 +64,7 @@ class ArView(
     private val routeRenderer = RouteRenderer()
     private val beaconRenderer = BeaconRenderer()
     private val groundArrowRenderer = GroundArrowRenderer()
+    private val pinRenderer = PinRenderer()
     private val infoLabel = BillboardTextRenderer()
     private val destLabel = BillboardTextRenderer()
 
@@ -76,7 +78,6 @@ class ArView(
     private val viewMatrix = FloatArray(16)
     private val projMatrix = FloatArray(16)
     private val viewProjMatrix = FloatArray(16)
-    private val anchorMatrix = FloatArray(16)
 
     private var phase = 0f
 
@@ -88,6 +89,7 @@ class ArView(
     // Guidance text drawn as 3D labels (written on main; read on the GL thread).
     @Volatile private var distanceText: String? = null
     @Volatile private var stepsText: String? = null
+    @Volatile private var etaText: String? = null
     @Volatile private var destName: String? = null
 
     private var lastTrackingState = ""
@@ -149,6 +151,7 @@ class ArView(
                 val args = call.arguments as Map<String, Any?>
                 distanceText = args["distanceText"] as String?
                 stepsText = args["stepsText"] as String?
+                etaText = args["etaText"] as String?
                 destName = args["destName"] as String?
                 result.success(null)
             }
@@ -214,6 +217,7 @@ class ArView(
             routeRenderer.createOnGlThread()
             beaconRenderer.createOnGlThread()
             groundArrowRenderer.createOnGlThread()
+            pinRenderer.createOnGlThread()
             infoLabel.createOnGlThread()
             destLabel.createOnGlThread()
             glInitialised = true
@@ -250,21 +254,16 @@ class ArView(
                 Matrix.multiplyMM(viewProjMatrix, 0, projMatrix, 0, viewMatrix, 0)
 
                 val planes = session.getAllTrackables(Plane::class.java)
-                planeRenderer.draw(planes, viewMatrix, projMatrix)
-
                 maybePlaceAnchor(frame)
 
                 // Resolve the true ground height under the camera and lock the
-                // path/arrows/text to it, so everything sits ON the road instead
+                // chevrons/pin/card to it, so everything sits ON the road instead
                 // of floating. Falls back to an eye-height estimate before a
                 // plane is found, so guidance appears immediately at foot level.
+                // The plane grid and anchor disc are intentionally NOT drawn — a
+                // clean camera view with only the guidance objects reads far more
+                // professionally than surfaces scribbled all over the scene.
                 val groundY = resolveGroundY(planes, camera.pose.ty())
-                anchor?.let { a ->
-                    if (a.trackingState == TrackingState.TRACKING) {
-                        a.pose.toMatrix(anchorMatrix, 0)
-                        markerRenderer.draw(anchorMatrix, viewMatrix, projMatrix)
-                    }
-                }
                 renderRoute(camera, groundY)
 
                 phase += 0.015f
@@ -281,18 +280,17 @@ class ArView(
     // endregion
 
     /**
-     * Projects the route (and destination) from geographic coordinates into the
-     * ARCore world frame and renders them on the ground.
+     * Renders the professional guidance scene, geo-aligned to the real world:
+     *  1. flowing **3D chevrons** on the road for the next ~12 m (walk this way),
+     *  2. a **3D map pin** floating toward the destination building (which side),
+     *  3. one **info card** (distance · steps · ETA) above the road ahead.
      *
-     * Alignment is derived every frame from the camera's own forward/right axes
-     * and the device compass heading, which makes the mapping rotation-invariant:
-     * as the user pans the phone, the ribbon and beacon stay locked to their real
-     * geographic positions.
+     * The east/north basis is derived every frame from the camera axes and the
+     * compass heading, so the mapping is rotation-invariant: as the user pans the
+     * phone, everything stays locked to its real geographic position.
      */
     private fun renderRoute(camera: Camera, groundY: Float) {
-        val route = routeGeo ?: return
         val p = pose ?: return
-        if (route.size < 4) return
 
         val userLat = p[0]
         val userLng = p[1]
@@ -309,8 +307,8 @@ class ArView(
         var fZ = -z[2].toDouble()
         var rX = x[0].toDouble()
         var rZ = x[2].toDouble()
-        var fLen = sqrt(fX * fX + fZ * fZ)
-        var rLen = sqrt(rX * rX + rZ * rZ)
+        val fLen = sqrt(fX * fX + fZ * fZ)
+        val rLen = sqrt(rX * rX + rZ * rZ)
         if (fLen < 1e-6 || rLen < 1e-6) return
         fX /= fLen; fZ /= fLen
         rX /= rLen; rZ /= rLen
@@ -332,127 +330,162 @@ class ArView(
         val mPerDegLat = 111_320.0
         val mPerDegLng = 111_320.0 * cos(Math.toRadians(userLat))
 
-        val count = route.size / 2
-        val world = FloatArray(count * 3)
-        for (i in 0 until count) {
-            val lat = route[i * 2]
-            val lng = route[i * 2 + 1]
-            val north = (lat - userLat) * mPerDegLat
-            val east = (lng - userLng) * mPerDegLng
-            world[i * 3] = (camX + east * eastX + north * northX).toFloat()
-            world[i * 3 + 1] = groundY + 0.02f // hug the ground, avoid z-fighting
-            world[i * 3 + 2] = (camZ + east * eastZ + north * northZ).toFloat()
-        }
-        routeRenderer.draw(world, count, viewProjMatrix, phase)
+        val ux = camX.toFloat()
+        val uz = camZ.toFloat()
+        val camRight = camPose.xAxis
+        val camUp = camPose.yAxis
 
-        // Flowing 3D direction arrows painted flat on the ground along the path.
-        drawGroundArrows(world, count, groundY)
+        // Forward direction to place the card; set by the near route if present.
+        var forwardDx = (fX).toFloat()
+        var forwardDz = (fZ).toFloat()
 
-        // "distance • steps" painted flat on the road a few metres ahead,
-        // reading in the walking direction (like painted text on a street).
-        val dText = distanceText
-        val sText = stepsText
-        if (dText != null && sText != null) {
-            val near = pointAlong(world, count, 5.5f)
-            val far = pointAlong(world, count, 8.0f)
-            var dx = far[0] - near[0]
-            var dz = far[1] - near[1]
-            if (dx * dx + dz * dz < 1e-4f) {
-                dx = world[(count - 1) * 3] - world[0]
-                dz = world[(count - 1) * 3 + 2] - world[2]
+        // 1) Flowing 3D chevrons along the immediate route ahead.
+        val route = routeGeo
+        if (route != null && route.size >= 4) {
+            val count = route.size / 2
+            val world = FloatArray(count * 2)
+            for (i in 0 until count) {
+                val north = (route[i * 2] - userLat) * mPerDegLat
+                val east = (route[i * 2 + 1] - userLng) * mPerDegLng
+                world[i * 2] = (camX + east * eastX + north * northX).toFloat()
+                world[i * 2 + 1] = (camZ + east * eastZ + north * northZ).toFloat()
             }
-            infoLabel.setText("$dText   •   $sText")
-            infoLabel.drawOnGround(
-                near[0], groundY + 0.04f, near[1],
-                dx, dz, viewProjMatrix, 1.1f,
-            )
+            val dir = drawForwardChevrons(world, count, ux, uz, groundY)
+            if (dir != null) {
+                forwardDx = dir[0]
+                forwardDz = dir[1]
+            }
         }
 
+        // 2) Destination map pin (clamped near enough to always be visible) with
+        //    a camera-facing name + distance label above it.
         destGeo?.let { d ->
             val north = (d[0] - userLat) * mPerDegLat
             val east = (d[1] - userLng) * mPerDegLng
-            val bx = (camX + east * eastX + north * northX).toFloat()
-            val bz = (camZ + east * eastZ + north * northZ).toFloat()
-            // Tall glowing beacon so the target building is visible from afar.
-            beaconRenderer.draw(bx, groundY, bz, viewProjMatrix, phase)
+            val dxW = (camX + east * eastX + north * northX).toFloat()
+            val dzW = (camZ + east * eastZ + north * northZ).toFloat()
+            var vx = dxW - ux
+            var vz = dzW - uz
+            val dist = sqrt(vx * vx + vz * vz)
+            val shown = min(dist, 24f)
+            val pinX: Float
+            val pinZ: Float
+            if (dist > 1e-3f) {
+                pinX = ux + vx / dist * shown
+                pinZ = uz + vz / dist * shown
+            } else {
+                pinX = dxW
+                pinZ = dzW
+            }
+            // Warm red pin — the universal "destination" marker.
+            pinRenderer.draw(pinX, groundY, pinZ, viewProjMatrix, phase, 1.2f,
+                0.95f, 0.28f, 0.30f)
 
             destName?.let { name ->
-                // Destination name painted flat on the ground at the beacon base.
-                var lx = (bx - camX).toFloat()
-                var lz = (bz - camZ).toFloat()
-                val dl = sqrt(lx * lx + lz * lz)
-                if (dl > 1e-3f) { lx /= dl; lz /= dl } else { lx = 0f; lz = 1f }
-                destLabel.setText(name)
-                destLabel.drawOnGround(
-                    bx - lx * 1.8f, groundY + 0.05f, bz - lz * 1.8f,
-                    lx, lz, viewProjMatrix, 1.4f,
-                )
+                val dText = distanceText
+                val label = if (dText != null) "$name   •   $dText" else name
+                destLabel.setText(label)
+                destLabel.draw(pinX, groundY + 3.4f, pinZ,
+                    camRight, camUp, viewProjMatrix, 0.9f)
             }
+        }
+
+        // 3) One professional info card floating just above the road ahead.
+        val dText = distanceText
+        val sText = stepsText
+        if (dText != null && sText != null) {
+            val ahead = 4.5f
+            val ax = ux + forwardDx * ahead
+            val az = uz + forwardDz * ahead
+            val sub = etaText?.let { "$sText  ·  $it" } ?: sText
+            infoLabel.setCard(destName ?: "Destination", dText, sub)
+            infoLabel.draw(ax, groundY + 1.45f, az,
+                camRight, camUp, viewProjMatrix, 1.15f)
         }
     }
 
-    /** Emits arrows every few metres along the world path (out to ~70 m). */
-    private fun drawGroundArrows(world: FloatArray, count: Int, groundY: Float) {
-        if (count < 2) return
-        val spacing = 3.2f
-        val maxDist = 70f
-        val arrowY = groundY + 0.03f
+    /**
+     * Draws flowing 3D chevrons for the next ~12 m of the route ahead of the
+     * user's nearest point on the path. Returns the initial forward unit
+     * direction (XZ) so the info card can be placed along it, or null.
+     */
+    private fun drawForwardChevrons(
+        world: FloatArray,
+        count: Int,
+        ux: Float,
+        uz: Float,
+        groundY: Float,
+    ): FloatArray? {
+        if (count < 2) return null
 
-        var acc = 0f
-        var nextEmit = spacing
-        var i = 0
-        while (i < count - 1 && acc < maxDist) {
-            val ax = world[i * 3]
-            val az = world[i * 3 + 2]
-            val bx = world[(i + 1) * 3]
-            val bz = world[(i + 1) * 3 + 2]
-            val segDx = bx - ax
-            val segDz = bz - az
-            val segLen = sqrt(segDx * segDx + segDz * segDz)
-            if (segLen < 1e-4f) {
-                i++
-                continue
-            }
-            val headingDeg = Math.toDegrees(atan2(segDx, segDz).toDouble()).toFloat()
-            while (nextEmit <= acc + segLen && nextEmit < maxDist) {
-                val t = (nextEmit - acc) / segLen
-                val px = ax + segDx * t
-                val pz = az + segDz * t
-                // Highlight band that flows forward over time.
-                var cp = (nextEmit * 0.16f - phase * 0.6f) % 1f
-                if (cp < 0f) cp += 1f
-                val glow = (1f - min(cp, 1f - cp) * 4f).coerceIn(0f, 1f)
-                groundArrowRenderer.draw(
-                    px, arrowY, pz, headingDeg, viewProjMatrix,
-                    0.10f, 0.55f + 0.20f * glow, 0.45f + 0.55f * glow,
-                    0.40f + 0.55f * glow,
-                )
-                nextEmit += spacing
-            }
-            acc += segLen
-            i++
+        // Nearest point on the polyline to the user → start just ahead of it.
+        var bestSeg = 0
+        var bestT = 0f
+        var bestD2 = Float.MAX_VALUE
+        for (i in 0 until count - 1) {
+            val ax = world[i * 2]; val az = world[i * 2 + 1]
+            val dx = world[(i + 1) * 2] - ax; val dz = world[(i + 1) * 2 + 1] - az
+            val len2 = dx * dx + dz * dz
+            var t = 0f
+            if (len2 > 1e-6f) t = (((ux - ax) * dx + (uz - az) * dz) / len2).coerceIn(0f, 1f)
+            val px = ax + dx * t; val pz = az + dz * t
+            val d2 = (px - ux) * (px - ux) + (pz - uz) * (pz - uz)
+            if (d2 < bestD2) { bestD2 = d2; bestSeg = i; bestT = t }
         }
+
+        var s0 = 0f
+        for (i in 0 until bestSeg) {
+            val ax = world[i * 2]; val az = world[i * 2 + 1]
+            val dx = world[(i + 1) * 2] - ax; val dz = world[(i + 1) * 2 + 1] - az
+            s0 += sqrt(dx * dx + dz * dz)
+        }
+        run {
+            val ax = world[bestSeg * 2]; val az = world[bestSeg * 2 + 1]
+            val dx = world[(bestSeg + 1) * 2] - ax; val dz = world[(bestSeg + 1) * 2 + 1] - az
+            s0 += sqrt(dx * dx + dz * dz) * bestT
+        }
+
+        val spacing = 2.4f
+        val ahead = 12f
+        val arrowY = groundY + 0.02f
+        var firstDir: FloatArray? = null
+        var emit = 1.2f
+        while (emit <= ahead) {
+            val pd = pointAndDir(world, count, s0 + emit) ?: break
+            if (firstDir == null) firstDir = floatArrayOf(pd[2], pd[3])
+            val headingDeg = Math.toDegrees(atan2(pd[2].toDouble(), pd[3].toDouble())).toFloat()
+            // Highlight band that flows forward over time.
+            var cp = (emit * 0.18f - phase * 0.9f) % 1f
+            if (cp < 0f) cp += 1f
+            val glow = (1f - min(cp, 1f - cp) * 3f).coerceIn(0f, 1f)
+            groundArrowRenderer.draw(
+                pd[0], arrowY, pd[1], headingDeg, viewProjMatrix, 0.9f,
+                0.0f, 0.60f + 0.35f * glow, 0.45f + 0.45f * glow, 0.60f + 0.40f * glow,
+            )
+            emit += spacing
+        }
+        return firstDir
     }
 
-    /** World XZ of the point [dist] metres along the path from its start. */
-    private fun pointAlong(world: FloatArray, count: Int, dist: Float): FloatArray {
-        if (count < 2) return floatArrayOf(world[0], world[2])
+    /**
+     * [x, z, dirX, dirZ] at cumulative distance [s] along the world polyline,
+     * with the direction normalised; null once past the end of the path.
+     */
+    private fun pointAndDir(world: FloatArray, count: Int, s: Float): FloatArray? {
+        if (count < 2) return null
         var acc = 0f
         for (i in 0 until count - 1) {
-            val ax = world[i * 3]
-            val az = world[i * 3 + 2]
-            val bx = world[(i + 1) * 3]
-            val bz = world[(i + 1) * 3 + 2]
-            val dx = bx - ax
-            val dz = bz - az
+            val ax = world[i * 2]; val az = world[i * 2 + 1]
+            val dx = world[(i + 1) * 2] - ax; val dz = world[(i + 1) * 2 + 1] - az
             val segLen = sqrt(dx * dx + dz * dz)
-            if (acc + segLen >= dist) {
-                val t = if (segLen < 1e-4f) 0f else (dist - acc) / segLen
-                return floatArrayOf(ax + dx * t, az + dz * t)
+            if (segLen < 1e-4f) continue
+            if (acc + segLen >= s) {
+                val t = ((s - acc) / segLen).coerceIn(0f, 1f)
+                return floatArrayOf(ax + dx * t, az + dz * t, dx / segLen, dz / segLen)
             }
             acc += segLen
         }
-        return floatArrayOf(world[(count - 1) * 3], world[(count - 1) * 3 + 2])
+        return null
     }
 
     /**

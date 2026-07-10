@@ -23,13 +23,13 @@ the app and start navigating.
   paths, and selecting a building draws a **lane-following walking route** (casing + gradient line,
   direction chevrons and a small **animated walking character** that travels the route) with live
   distance/ETA.
-- 📸 **AR Mode** — a real ARCore session with horizontal-plane detection. The walking route is
-  **painted flat on the road surface** (not floating) as a flowing ribbon with **3D direction
-  arrows** running along it, and the remaining **metres · step count** and the destination name
-  are **painted flat on the ground** like street markings — placed from your GPS position, compass
-  heading and the live camera pose. A single tall glowing **beacon** marks the destination so you
-  can spot the target building from across campus. Everything is geo-aligned and stays locked to
-  the world as you look around 360°.
+- 📸 **AR Mode** — a real ARCore session with horizontal-plane detection and a deliberately clean
+  camera view (no plane grid or clutter). Three geo-aligned 3D objects guide you: **flowing 3D
+  chevrons** on the road show the next few metres to walk; a **floating 3D map pin** hovers toward
+  the destination building with its **name and live distance**, so you instantly see which way it
+  is; and one **professional info card** (distance · steps · ETA) floats above the road ahead.
+  Everything is locked to the real world as you look around 360°, and a 2D heads-up arrow tells
+  you which way to turn when the building is out of view.
 - 🧭 Sensor fusion — GPS (position), compass (heading) and camera (ARCore) combined to compute
   the bearing/distance and to project the route into the AR world frame.
 - 🧭 Routing — an **on-device campus footpath graph** (Dijkstra) keeps walking directions on the

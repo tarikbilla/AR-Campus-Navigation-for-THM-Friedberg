@@ -66,11 +66,13 @@ class ArViewController {
   Future<void> updateGuidance({
     required String distanceText,
     required String stepsText,
+    required String etaText,
     required String destName,
   }) {
     return _invoke('updateGuidance', {
       'distanceText': distanceText,
       'stepsText': stepsText,
+      'etaText': etaText,
       'destName': destName,
     });
   }
